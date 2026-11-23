@@ -5,6 +5,8 @@ const modeBtnText = document.getElementById("mode-btn-text");
 const modeBadge = document.getElementById("mode-badge");
 const layoutBtn = document.getElementById("layout-btn");
 const refreshBtn = document.getElementById("refresh-btn");
+const menuBtn = document.getElementById("menu-btn");
+const quitBtn = document.getElementById("quit-btn");
 const bentoContainer = document.getElementById("bento-container");
 const widgetCard = document.getElementById("widget-card");
 
@@ -131,6 +133,32 @@ function renderWidget(quotaData, isCompact) {
   const ringItems = quotaData?.ringItems || [];
 
   if (groups.length === 0) {
+    if (isCompact) {
+      bentoContainer.innerHTML = `
+        <div class="pill-row" style="justify-content:space-between;padding:4px 6px">
+          <span style="font-size:11px;color:rgba(255,255,255,0.65)">Waiting for Antigravity...</span>
+          <div style="display:flex;gap:4px">
+            <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
+            <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
+          </div>
+        </div>
+      `;
+      const expandBtn = document.getElementById("expand-pill-btn");
+      if (expandBtn) {
+        expandBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          window.antigravityWidget.toggleCompact();
+        });
+      }
+      const pillMenuBtn = document.getElementById("pill-menu-btn");
+      if (pillMenuBtn) {
+        pillMenuBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          window.antigravityWidget.showMenu();
+        });
+      }
+      return;
+    }
     bentoContainer.innerHTML = `
       <div class="bento-card empty-card">
         <span>Waiting for Antigravity live quota...</span>
@@ -169,6 +197,7 @@ function renderWidget(quotaData, isCompact) {
           })
           .join("")}
         <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
+        <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
       </div>
     `;
     const expandBtn = document.getElementById("expand-pill-btn");
@@ -176,6 +205,13 @@ function renderWidget(quotaData, isCompact) {
       expandBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         window.antigravityWidget.toggleCompact();
+      });
+    }
+    const pillMenuBtn = document.getElementById("pill-menu-btn");
+    if (pillMenuBtn) {
+      pillMenuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.antigravityWidget.showMenu();
       });
     }
     return;
@@ -223,6 +259,26 @@ layoutBtn.addEventListener("click", (e) => {
 refreshBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   window.antigravityWidget.refresh();
+});
+
+if (menuBtn) {
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    window.antigravityWidget.showMenu();
+  });
+}
+
+if (quitBtn) {
+  quitBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    window.antigravityWidget.quit();
+  });
+}
+
+// Right-click anywhere on the widget opens the full OrbitHUD control menu (Windows / Linux / macOS)
+window.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  window.antigravityWidget.showMenu();
 });
 
 let isDragging = false;

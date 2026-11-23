@@ -9,5 +9,7 @@ contextBridge.exposeInMainWorld("antigravityWidget", {
   toggleMode: () => ipcRenderer.invoke("widget:toggle-mode"),
   toggleCompact: () => ipcRenderer.invoke("widget:toggle-compact"),
   refresh: () => ipcRenderer.invoke("widget:refresh"),
+  showMenu: () => ipcRenderer.send("widget:show-menu"),
+  quit: () => ipcRenderer.send("widget:quit"),
   moveBy: (dx, dy) => ipcRenderer.send("widget:move-by", { dx, dy }),
 });

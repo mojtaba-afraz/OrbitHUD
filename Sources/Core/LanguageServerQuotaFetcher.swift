@@ -229,12 +229,19 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
             candidates.append(LanguageServerConnection(port: port, csrfToken: token))
         }
 
-        // 2. Check cached connection from disk
+        // 2. Check Antigravity daemon discovery files (~/.gemini/antigravity/daemon/*.json)
+        for daemonConn in Self.discoverConnectionsFromDaemonFiles() {
+            if !candidates.contains(daemonConn) {
+                candidates.append(daemonConn)
+            }
+        }
+
+        // 3. Check cached connection from disk
         if let cached = Self.loadCachedConnection(), !candidates.contains(cached) {
             candidates.append(cached)
         }
 
-        // 3. Discover from `ps auxeww`
+        // 4. Discover from `ps auxeww`
         for discovered in discoverConnectionsFromPs() {
             if !candidates.contains(discovered) {
                 candidates.append(discovered)
@@ -251,6 +258,38 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
         }
 
         return nil
+    }
+
+    public static func discoverConnectionsFromDaemonFiles() -> [LanguageServerConnection] {
+        var results: [LanguageServerConnection] = []
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let dirs = [
+            home.appendingPathComponent(".gemini/antigravity/daemon"),
+            home.appendingPathComponent(".gemini/antigravity-ide/daemon"),
+            home.appendingPathComponent(".gemini/antigravity-cli/daemon")
+        ]
+        for dir in dirs {
+            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+                continue
+            }
+            for file in files where file.pathExtension == "json" {
+                guard let data = try? Data(contentsOf: file),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let token = (obj["csrfToken"] as? String) ?? (obj["csrf_token"] as? String),
+                      !token.isEmpty, token != "REDACTED" else {
+                    continue
+                }
+                for key in ["httpsPort", "httpPort", "port", "hubPort", "lspPort"] {
+                    if let port = obj[key] as? Int, port > 1024 {
+                        let conn = LanguageServerConnection(port: port, csrfToken: token)
+                        if !results.contains(conn) {
+                            results.append(conn)
+                        }
+                    }
+                }
+            }
+        }
+        return results
     }
 
     private func discoverConnectionsFromPs() -> [LanguageServerConnection] {

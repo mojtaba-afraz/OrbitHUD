@@ -27,7 +27,7 @@ const STATE_PATH = path.join(
 
 const DEFAULT_STATE = {
   mode: "floating", // "floating" | "desktop"
-  compact: false, // false = 1x4 Wide (356x156), true = 2x2 Square (210x225)
+  compact: false, // false = Bento Glass (356x280), true = Compact Pill (356x68)
   locked: false,
   opacity: 0.96,
   x: null,
@@ -61,6 +61,22 @@ function getTargetDimensions() {
     : { width: 356, height: 280 };
 }
 
+function getAppIconImage() {
+  const candidates = [
+    path.join(__dirname, "..", "assets", "tray-icon.png"),
+    path.join(__dirname, "..", "assets", "icon.png"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      const img = nativeImage.createFromPath(p);
+      if (!img.isEmpty()) {
+        return img;
+      }
+    }
+  }
+  return nativeImage.createEmpty();
+}
+
 function createWidgetWindow() {
   const { width, height } = getTargetDimensions();
   const primaryDisplay = screen.getPrimaryDisplay();
@@ -82,6 +98,7 @@ function createWidgetWindow() {
     fullscreenable: false,
     skipTaskbar: true,
     hasShadow: true,
+    icon: getAppIconImage(),
     backgroundColor: "#00000000",
     ...(process.platform === "darwin"
       ? { vibrancy: "hud", visualEffectState: "active" }
@@ -126,11 +143,9 @@ function applyWindowMode() {
   widgetWindow.setSkipTaskbar(true);
 
   if (state.mode === "floating") {
-    // Always-on-top Floating HUD across Windows, Linux, and macOS
     widgetWindow.setAlwaysOnTop(true, "floating");
     widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   } else {
-    // Desktop Pinned Widget mode (sits on desktop behind normal windows)
     if (process.platform === "darwin") {
       widgetWindow.setAlwaysOnTop(false, "normal", -1);
     } else {
@@ -164,23 +179,7 @@ async function refreshQuota() {
   updateTrayMenu();
 }
 
-function createTrayIcon() {
-  // Official OrbitHUD SVG logo (dual orbital rings + center sparkle core)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="64 64 384 384" width="16" height="16">
-    <circle cx="256" cy="256" r="144" fill="none" stroke="#3DDB94" stroke-width="36" stroke-linecap="round" stroke-dasharray="700 905" transform="rotate(-90 256 256)" />
-    <circle cx="256" cy="256" r="96" fill="none" stroke="#38BDF8" stroke-width="28" stroke-linecap="round" stroke-dasharray="420 603" transform="rotate(-45 256 256)" />
-    <path d="M256 190 C262 232, 280 250, 322 256 C280 262, 262 280, 256 322 C250 280, 232 262, 190 256 C232 250, 250 232, 256 190 Z" fill="#FFFFFF" />
-  </svg>`;
-  const img = nativeImage.createFromDataURL(
-    `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
-  );
-  tray = new Tray(img);
-  tray.setToolTip("OrbitHUD — Antigravity Usage Widget");
-  updateTrayMenu();
-}
-
-function updateTrayMenu() {
-  if (!tray) return;
+function buildControlMenuTemplate() {
   const items = state.lastQuotaData?.ringItems || [];
   const summaryLines =
     items.length > 0
@@ -188,10 +187,10 @@ function updateTrayMenu() {
           label: `${it.title}: ${it.remainingPercentage}% (${it.subtitle})`,
           enabled: false,
         }))
-      : [{ label: "Syncing with Antigravity...", enabled: false }];
+      : [{ label: "Waiting for Antigravity live quota...", enabled: false }];
 
-  const menu = Menu.buildFromTemplate([
-    { label: "Antigravity Usage Widget", enabled: false },
+  return [
+    { label: "OrbitHUD — Antigravity Usage", enabled: false },
     { type: "separator" },
     ...summaryLines,
     { type: "separator" },
@@ -219,7 +218,7 @@ function updateTrayMenu() {
     },
     { type: "separator" },
     {
-      label: "Square 2×2 iOS Layout",
+      label: "Compact Coding Pill Layout",
       type: "checkbox",
       checked: state.compact,
       click: () => {
@@ -241,20 +240,56 @@ function updateTrayMenu() {
       },
     },
     {
-      label: "Refresh Now",
+      label: "Window Opacity",
+      submenu: [1.0, 0.95, 0.85, 0.75, 0.65].map((op) => ({
+        label: `${Math.round(op * 100)}%`,
+        type: "radio",
+        checked: Math.abs(state.opacity - op) < 0.03,
+        click: () => {
+          state.opacity = op;
+          saveState();
+          applyWindowMode();
+          sendStateToRenderer();
+        },
+      })),
+    },
+    {
+      label: "Refresh Usage Now",
       click: () => refreshQuota(),
     },
     { type: "separator" },
     {
-      label: "Quit",
+      label: "Quit OrbitHUD",
       click: () => app.quit(),
     },
-  ]);
+  ];
+}
 
+function createTrayIcon() {
+  try {
+    const img = getAppIconImage();
+    if (img.isEmpty()) return;
+    tray = new Tray(img.resize({ width: 16, height: 16 }));
+    tray.setToolTip("OrbitHUD — Antigravity Usage Widget");
+    tray.on("click", () => {
+      if (widgetWindow && !widgetWindow.isDestroyed()) {
+        widgetWindow.show();
+        widgetWindow.focus();
+      }
+    });
+    updateTrayMenu();
+  } catch {
+    // ignore tray failure on headless environments
+  }
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const menu = Menu.buildFromTemplate(buildControlMenuTemplate());
   tray.setContextMenu(menu);
 }
 
-// IPC handlers for renderer controls & cross-platform smooth dragging
+// IPC handlers for renderer controls, context menu, and Quit
 ipcMain.handle("widget:toggle-mode", () => {
   state.mode = state.mode === "floating" ? "desktop" : "floating";
   saveState();
@@ -274,6 +309,16 @@ ipcMain.handle("widget:toggle-compact", () => {
 ipcMain.handle("widget:refresh", async () => {
   await refreshQuota();
   return state;
+});
+
+ipcMain.on("widget:show-menu", () => {
+  if (!widgetWindow || widgetWindow.isDestroyed()) return;
+  const menu = Menu.buildFromTemplate(buildControlMenuTemplate());
+  menu.popup({ window: widgetWindow });
+});
+
+ipcMain.on("widget:quit", () => {
+  app.quit();
 });
 
 ipcMain.on("widget:move-by", (_event, { dx, dy }) => {

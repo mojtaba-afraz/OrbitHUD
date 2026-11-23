@@ -13,6 +13,8 @@ const PORT_PATTERNS = [
   /--hub-port\s+(\d+)/gi,
   /--https_server_port=(\d+)/gi,
   /--https_server_port\s+(\d+)/gi,
+  /--http_server_port=(\d+)/gi,
+  /--http_server_port\s+(\d+)/gi,
 ];
 
 const TOKEN_PATTERNS = [
@@ -54,8 +56,173 @@ function loadCachedConnection() {
 }
 
 /**
+ * Extracts candidate ports from a daemon discovery JSON object (`hub_<port>.json` or `ls_<id>.json`).
+ */
+function extractPortsFromDiscoveryObject(obj, filename = "") {
+  if (!obj || typeof obj !== "object") return [];
+  const candidatePorts = [];
+  for (const key of ["httpsPort", "httpPort", "port", "hubPort", "lspPort", "https_port", "http_port"]) {
+    const val = obj[key];
+    if (typeof val === "number" && val > 1024 && !candidatePorts.includes(val)) {
+      candidatePorts.push(val);
+    } else if (typeof val === "string" && /^\d+$/.test(val)) {
+      const p = parseInt(val, 10);
+      if (p > 1024 && !candidatePorts.includes(p)) candidatePorts.push(p);
+    }
+  }
+
+  const nameMatch = /hub_(\d+)\.json$/i.exec(filename);
+  if (nameMatch) {
+    const p = parseInt(nameMatch[1], 10);
+    if (p > 1024 && !candidatePorts.includes(p)) {
+      candidatePorts.push(p);
+    }
+  }
+  return candidatePorts;
+}
+
+/**
+ * Parses a single Antigravity daemon discovery JSON file (`hub_<port>.json` or `ls_<id>.json`).
+ */
+function parseDiscoveryJsonObject(obj, filename = "") {
+  if (!obj || typeof obj !== "object") return [];
+
+  const csrfToken =
+    obj.csrfToken ||
+    obj.csrf_token ||
+    obj.token ||
+    obj.extensionServerCsrfToken ||
+    "";
+  if (
+    typeof csrfToken !== "string" ||
+    !csrfToken.trim() ||
+    csrfToken.trim() === "REDACTED"
+  ) {
+    return [];
+  }
+
+  const candidatePorts = extractPortsFromDiscoveryObject(obj, filename);
+  return candidatePorts.map((port) => ({
+    port,
+    csrfToken: csrfToken.trim(),
+  }));
+}
+
+function getCandidateDaemonDirs(homeDir = os.homedir()) {
+  const dirs = new Set([
+    path.join(homeDir, ".gemini", "antigravity", "daemon"),
+    path.join(homeDir, ".gemini", "antigravity-ide", "daemon"),
+    path.join(homeDir, ".gemini", "antigravity-cli", "daemon"),
+    path.join(homeDir, ".gemini", "antigravity-dev", "daemon"),
+    path.join(homeDir, ".codeium", "antigravity", "daemon"),
+  ]);
+
+  const roots = [homeDir];
+  if (process.env.USERPROFILE && process.env.USERPROFILE !== homeDir) {
+    roots.push(process.env.USERPROFILE);
+  }
+  for (const root of roots) {
+    const geminiRoot = path.join(root, ".gemini");
+    try {
+      for (const sub of fs.readdirSync(geminiRoot)) {
+        dirs.add(path.join(geminiRoot, sub, "daemon"));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (process.env.APPDATA) {
+    dirs.add(path.join(process.env.APPDATA, "Antigravity", "daemon"));
+    dirs.add(path.join(process.env.APPDATA, "Antigravity IDE", "daemon"));
+    dirs.add(path.join(process.env.APPDATA, ".gemini", "antigravity", "daemon"));
+  }
+  if (process.env.LOCALAPPDATA) {
+    dirs.add(path.join(process.env.LOCALAPPDATA, "Antigravity", "daemon"));
+    dirs.add(path.join(process.env.LOCALAPPDATA, "Antigravity IDE", "daemon"));
+  }
+
+  return Array.from(dirs);
+}
+
+/**
+ * Cross-platform discovery from Antigravity's official daemon discovery directory:
+ * `~/.gemini/antigravity/daemon/hub_*.json` & `ls_*.json` (works on Windows, Linux, and macOS).
+ */
+function discoverFromDaemonFiles(homeDir = os.homedir()) {
+  const results = [];
+  const candidateDirs = getCandidateDaemonDirs(homeDir);
+
+  for (const dir of candidateDirs) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+
+    // Sort newest first by mtime so most recently started hub/ls is tried first
+    const jsonFiles = entries
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        const fullPath = path.join(dir, f);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = fs.statSync(fullPath).mtimeMs;
+        } catch {
+          // ignore
+        }
+        return { name: f, fullPath, mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    for (const file of jsonFiles) {
+      try {
+        const raw = fs.readFileSync(file.fullPath, "utf8");
+        const parsed = JSON.parse(raw);
+        for (const conn of parseDiscoveryJsonObject(parsed, file.name)) {
+          results.push(conn);
+        }
+      } catch {
+        // ignore malformed file
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Collects all ports mentioned in `daemon/*.json` even when `csrfToken` is redacted,
+ * so they can be paired with CSRF tokens discovered from OS process environments.
+ */
+function discoverPortsFromDaemonFiles(homeDir = os.homedir()) {
+  const ports = [];
+  for (const dir of getCandidateDaemonDirs(homeDir)) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const f of entries) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        const raw = fs.readFileSync(path.join(dir, f), "utf8");
+        const parsed = JSON.parse(raw);
+        for (const p of extractPortsFromDiscoveryObject(parsed, f)) {
+          if (!ports.includes(p)) ports.push(p);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return ports;
+}
+
+/**
  * Extracts all `{ port, csrfToken }` combinations from process command line / environment strings.
- * Works across macOS (`ps auxeww`), Linux (`/proc/<pid>/cmdline` + `/proc/<pid>/environ`), and Windows.
  */
 function parseConnectionsFromText(text) {
   if (!text || typeof text !== "string") {
@@ -129,10 +296,6 @@ function parseConnectionsFromText(text) {
   return paired;
 }
 
-/**
- * Linux discovery: reads `/proc/<pid>/cmdline` and `/proc/<pid>/environ` directly for zero-overhead discovery,
- * with fallback to `ps auxeww`.
- */
 function discoverOnLinux() {
   const lines = [];
   try {
@@ -156,15 +319,15 @@ function discoverOnLinux() {
             .readFileSync(`/proc/${entry}/environ`, "utf8")
             .replace(/\0/g, " ");
         } catch {
-          // ignore permission errors on other users' processes
+          // ignore
         }
         lines.push(`${cmdline} ${environ}`);
       } catch {
-        // process exited or inaccessible
+        // ignore
       }
     }
   } catch {
-    // /proc not mounted
+    // ignore
   }
 
   try {
@@ -181,9 +344,6 @@ function discoverOnLinux() {
   return parseConnectionsFromText(lines.join("\n"));
 }
 
-/**
- * macOS discovery: runs `/bin/ps auxeww` and `/bin/ps efww`.
- */
 function discoverOnMacOS() {
   const chunks = [];
   for (const args of [["auxeww"], ["efww"]]) {
@@ -201,24 +361,97 @@ function discoverOnMacOS() {
   return parseConnectionsFromText(chunks.join("\n"));
 }
 
-/**
- * Windows discovery: queries Win32_Process via PowerShell for `agy.exe` / `language_server.exe` command lines
- * and environment blocks.
- */
 function discoverOnWindows() {
   const chunks = [];
+
+  // Include any ports from daemon/*.json in case csrfToken was redacted on disk
+  for (const p of discoverPortsFromDaemonFiles()) {
+    chunks.push(`agy --https_server_port=${p}`);
+  }
+
   try {
-    const psScript = [
-      "Get-CimInstance Win32_Process |",
-      "Where-Object { $_.Name -match 'agy|language_server|antigravity|node|electron' } |",
-      "ForEach-Object { $_.CommandLine }",
-    ].join(" ");
+    const psScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+$pebCode = @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class AgyPebReader {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROCESS_BASIC_INFORMATION {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr Reserved3;
+    }
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr h);
+    [DllImport("ntdll.dll")]
+    public static extern int NtQueryInformationProcess(IntPtr h, int cls, ref PROCESS_BASIC_INFORMATION pbi, int len, out int retLen);
+    [DllImport("kernel32.dll")]
+    public static extern bool ReadProcessMemory(IntPtr h, IntPtr addr, byte[] buf, int size, out int read);
+
+    public static string GetEnv(int pid) {
+        if (IntPtr.Size != 8) return "";
+        IntPtr h = OpenProcess(0x0410, false, pid);
+        if (h == IntPtr.Zero) return "";
+        try {
+            PROCESS_BASIC_INFORMATION pbi = new PROCESS_BASIC_INFORMATION();
+            int retLen;
+            if (NtQueryInformationProcess(h, 0, ref pbi, Marshal.SizeOf(pbi), out retLen) != 0 || pbi.PebBaseAddress == IntPtr.Zero) return "";
+            byte[] ptrBuf = new byte[8];
+            int read;
+            if (!ReadProcessMemory(h, IntPtr.Add(pbi.PebBaseAddress, 0x20), ptrBuf, 8, out read) || read != 8) return "";
+            long procParams = BitConverter.ToInt64(ptrBuf, 0);
+            if (procParams == 0) return "";
+            if (!ReadProcessMemory(h, new IntPtr(procParams + 0x80), ptrBuf, 8, out read) || read != 8) return "";
+            long envPtr = BitConverter.ToInt64(ptrBuf, 0);
+            if (envPtr == 0) return "";
+            int envSize = 65536;
+            if (ReadProcessMemory(h, new IntPtr(procParams + 0x3F0), ptrBuf, 8, out read) && read == 8) {
+                long sz = BitConverter.ToInt64(ptrBuf, 0);
+                if (sz > 0 && sz < 524288) envSize = (int)sz;
+            }
+            byte[] envBuf = new byte[envSize];
+            if (!ReadProcessMemory(h, new IntPtr(envPtr), envBuf, envSize, out read) || read <= 0) return "";
+            return Encoding.Unicode.GetString(envBuf, 0, read).Replace('\\0', ' ');
+        } catch {
+            return "";
+        } finally {
+            CloseHandle(h);
+        }
+    }
+}
+"@
+try { Add-Type -TypeDefinition $pebCode -ErrorAction SilentlyContinue } catch {}
+
+$procs = Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'agy|language_server|antigravity' }
+foreach ($p in $procs) {
+    $cmd = $p.CommandLine
+    $portArgs = ""
+    if ($p.Name -match 'agy|language_server') {
+        $conns = Get-NetTCPConnection -State Listen -OwningProcess $p.ProcessId -ErrorAction SilentlyContinue
+        foreach ($c in $conns) {
+            if ($c.LocalPort -gt 1024) {
+                $portArgs += " --https_server_port=" + $c.LocalPort
+            }
+        }
+    }
+    $envStr = ""
+    try { $envStr = [AgyPebReader]::GetEnv([int]$p.ProcessId) } catch {}
+    Write-Output ("agy " + $cmd + " " + $portArgs + " " + $envStr)
+}
+`.trim();
     const out = execFileSync(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-Command", psScript],
       {
         encoding: "utf8",
-        timeout: 4000,
+        timeout: 8000,
         maxBuffer: 16 * 1024 * 1024,
         windowsHide: true,
       }
@@ -230,7 +463,7 @@ function discoverOnWindows() {
   return parseConnectionsFromText(chunks.join("\n"));
 }
 
-function discoverConnections(platform = process.platform) {
+function discoverFastConnections() {
   const candidates = [];
   const seen = new Set();
   const pushUnique = (conn) => {
@@ -253,13 +486,33 @@ function discoverConnections(platform = process.platform) {
     }
   }
 
-  // 2. Check cached connection on disk
+  // 2. Check Antigravity's official daemon discovery files (`~/.gemini/antigravity/daemon/hub_*.json` & `ls_*.json`)
+  for (const daemonConn of discoverFromDaemonFiles()) {
+    pushUnique(daemonConn);
+  }
+
+  // 3. Check cached connection on disk
   const cached = loadCachedConnection();
   if (cached) {
     pushUnique(cached);
   }
 
-  // 3. OS-specific live process discovery
+  return candidates;
+}
+
+function discoverConnections(platform = process.platform) {
+  const candidates = discoverFastConnections();
+  const seen = new Set(candidates.map((c) => `${c.port}:${c.csrfToken}`));
+  const pushUnique = (conn) => {
+    if (!conn || !conn.port || !conn.csrfToken) return;
+    const key = `${conn.port}:${conn.csrfToken}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      candidates.push(conn);
+    }
+  };
+
+  // 4. OS-specific live process discovery fallback
   let osConns = [];
   if (platform === "linux") {
     osConns = discoverOnLinux();
@@ -276,9 +529,6 @@ function discoverConnections(platform = process.platform) {
   return candidates;
 }
 
-/**
- * Formats reset duration identically to Antigravity: "6d 1h", "3h 10m", "6d 22h".
- */
 function formatResetDuration(resetTimeISO, nowMs = Date.now()) {
   if (!resetTimeISO) return null;
   const resetMs = Date.parse(resetTimeISO);
@@ -299,10 +549,6 @@ function formatResetDuration(resetTimeISO, nowMs = Date.now()) {
   return `${Math.max(minutes, 1)}m`;
 }
 
-/**
- * Parses the JSON response from `/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`
- * and maps it to both full `groups` and the 4 iOS Battery-Widget style `ringItems`.
- */
 function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
   const root = typeof rawJson === "string" ? JSON.parse(rawJson) : rawJson;
   if (!root || typeof root !== "object") return null;
@@ -358,7 +604,6 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
 
   if (groups.length === 0) return null;
 
-  // Map to 4 clean iOS Battery-Widget rings: Gemini 5h, Gemini Wk, Claude, Argon 4
   const ringItems = [];
   for (const group of groups) {
     const lower = group.displayName.toLowerCase();
@@ -484,9 +729,27 @@ function requestQuotaSummary(scheme, port, csrfToken) {
 }
 
 async function fetchLiveQuotaSummary() {
-  const candidates = discoverConnections();
-  for (const candidate of candidates) {
-    for (const scheme of ["http", "https"]) {
+  const tried = new Set();
+
+  // 1. Try fast candidates first (env, daemon/*.json, cached connection) without spawning ps/powershell
+  for (const candidate of discoverFastConnections()) {
+    const key = `${candidate.port}:${candidate.csrfToken}`;
+    tried.add(key);
+    for (const scheme of ["https", "http"]) {
+      const result = await requestQuotaSummary(scheme, candidate.port, candidate.csrfToken);
+      if (result) {
+        saveCachedConnection(candidate);
+        return result;
+      }
+    }
+  }
+
+  // 2. Fallback to full OS process & PEB environment discovery
+  for (const candidate of discoverConnections()) {
+    const key = `${candidate.port}:${candidate.csrfToken}`;
+    if (tried.has(key)) continue;
+    tried.add(key);
+    for (const scheme of ["https", "http"]) {
       const result = await requestQuotaSummary(scheme, candidate.port, candidate.csrfToken);
       if (result) {
         saveCachedConnection(candidate);
@@ -498,6 +761,8 @@ async function fetchLiveQuotaSummary() {
 }
 
 module.exports = {
+  parseDiscoveryJsonObject,
+  discoverFromDaemonFiles,
   parseConnectionsFromText,
   formatResetDuration,
   parseQuotaSummaryResponse,

@@ -1,6 +1,6 @@
 {
   "name": "orbithud",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OrbitHUD — Zero-Gravity Glassmorphic Desktop & Floating Usage Widget for Google Antigravity (Windows, Linux, macOS)",
   "main": "src/main.js",
   "scripts": {
@@ -50,12 +50,14 @@
       }
     },
     "win": {
+      "icon": "assets/icon.png",
       "target": [
         "nsis",
         "portable"
       ]
     },
     "linux": {
+      "icon": "assets/icon.png",
       "target": [
         "AppImage",
         "deb"

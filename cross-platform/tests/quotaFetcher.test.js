@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const {
+  parseDiscoveryJsonObject,
   parseConnectionsFromText,
   formatResetDuration,
   parseQuotaSummaryResponse,
@@ -9,9 +10,39 @@ const {
 
 console.log("Running Cross-Platform Antigravity Usage Widget tests...");
 
-// 1. Test Windows, Linux, and macOS process discovery patterns
+// 1. Test Antigravity daemon discovery files (`hub_56726.json` & `ls_*.json`)
+const hubDiscovery = parseDiscoveryJsonObject(
+  {
+    pid: 14820,
+    httpsPort: 56726,
+    httpPort: 56727,
+    lspPort: 56728,
+    lsVersion: "1.5.2",
+    csrfToken: "daemon-hub-token-abc",
+  },
+  "hub_56726.json"
+);
+assert.equal(hubDiscovery.length, 3);
+assert.deepEqual(hubDiscovery[0], { port: 56726, csrfToken: "daemon-hub-token-abc" });
+assert.deepEqual(hubDiscovery[1], { port: 56727, csrfToken: "daemon-hub-token-abc" });
+
+// Redacted token in discovery JSON should return empty array
+const redactedDiscovery = parseDiscoveryJsonObject(
+  {
+    pid: 14820,
+    httpsPort: 56726,
+    csrfToken: "REDACTED",
+  },
+  "ls_test.json"
+);
+assert.equal(redactedDiscovery.length, 0);
+console.log("  ✓ Antigravity daemon JSON discovery (hub_*.json / ls_*.json) passed");
+
+// 2. Test Windows (including --random_port + PEB env + NetTCPConnection), Linux, and macOS process discovery
 const sampleProcessDump = [
-  // Windows agy.exe process line
+  // Windows agy.exe / language_server.exe with --random_port, NetTCPConnection port, and PEB environment token
+  `agy "C:\\Program Files\\Antigravity\\resources\\bin\\language_server_windows_x64.exe" --enable_lsp --random_port --https_server_port=61420 ANTIGRAVITY_SERVER_CSRF_TOKEN=win-peb-token-999`,
+  // Windows agy.exe hub process line
   `"C:\\Users\\dev\\.gemini\\bin\\agy.exe" --hub --hub-port=58100 --app_data_dir=antigravity --csrf_token=win-token-123`,
   // Linux /proc/<pid>/cmdline + environ line
   `/home/dev/.gemini/bin/agy --hub --hub-port=56726 --app_data_dir=antigravity ANTIGRAVITY_SERVER_CSRF_TOKEN=linux-token-456`,
@@ -20,11 +51,12 @@ const sampleProcessDump = [
 ].join("\n");
 
 const connections = parseConnectionsFromText(sampleProcessDump);
-assert.equal(connections.length >= 3, true);
-assert.deepEqual(connections[0], { port: 58100, csrfToken: "win-token-123" });
-assert.deepEqual(connections[1], { port: 56726, csrfToken: "linux-token-456" });
-assert.deepEqual(connections[2], { port: 59200, csrfToken: "mac-token-789" });
-console.log("  ✓ Windows, Linux, and macOS process & CSRF token discovery passed");
+assert.equal(connections.length >= 4, true);
+assert.deepEqual(connections[0], { port: 61420, csrfToken: "win-peb-token-999" });
+assert.deepEqual(connections[1], { port: 58100, csrfToken: "win-token-123" });
+assert.deepEqual(connections[2], { port: 56726, csrfToken: "linux-token-456" });
+assert.deepEqual(connections[3], { port: 59200, csrfToken: "mac-token-789" });
+console.log("  ✓ Windows (PEB + NetTCPConnection + CLI), Linux, and macOS process discovery passed");
 
 // 2. Test RetrieveUserQuotaSummary parsing & iOS ring items mapping
 const sampleQuotaResponse = {

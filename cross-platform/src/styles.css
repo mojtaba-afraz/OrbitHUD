@@ -141,6 +141,17 @@ button:active {
   justify-content: center;
 }
 
+.glass-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.glass-icon-btn.quit-btn:hover {
+  background: rgba(255, 82, 82, 0.35);
+  border-color: rgba(255, 82, 82, 0.6);
+  color: #ff8a80;
+}
+
 .bento-container {
   display: flex;
   flex-direction: column;
