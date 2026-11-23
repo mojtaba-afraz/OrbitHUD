@@ -21,7 +21,11 @@
     "macos",
     "electron"
   ],
-  "author": "Antigravity Community",
+  "author": {
+    "name": "Mojtaba Afraz",
+    "email": "mojtaba.afraz@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/mojtaba-afraz/OrbitHUD",
   "license": "MIT",
   "devDependencies": {
     "electron": "^33.2.0",
@@ -56,7 +60,8 @@
         "AppImage",
         "deb"
       ],
-      "category": "Development"
+      "category": "Development",
+      "maintainer": "Mojtaba Afraz <mojtaba.afraz@users.noreply.github.com>"
     }
   }
 }
