@@ -18,6 +18,12 @@
 
 ---
 
+<div align="center">
+  <img src="assets/orbithud-showcase.png" alt="OrbitHUD Glassmorphism Bento & Compact Pill Showcase" width="100%" />
+</div>
+
+---
+
 **OrbitHUD** is a lightweight, real-time **Glassmorphism Desktop & Floating HUD Widget** for **Google Antigravity** (`Antigravity IDE` & `Antigravity 2.0`). It connects automatically to your local Antigravity Language Server / Hub process over loopback (`127.0.0.1`) with zero configuration or API keys required.
 
 ---
