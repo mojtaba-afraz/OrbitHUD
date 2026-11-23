@@ -1,0 +1,20 @@
+# Swift / macOS build artifacts
+.build/
+.swiftpm/
+dist/
+releases/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+
+# Node / Electron build artifacts
+cross-platform/node_modules/
+cross-platform/dist/
+cross-platform/out/
+package-lock.json
+
+# macOS system files
+.DS_Store
+Icon?
+._*

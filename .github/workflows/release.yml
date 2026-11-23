@@ -1,0 +1,131 @@
+name: Build & Publish Multi-OS Releases
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  # 1. Build Native macOS App (.dmg & .zip)
+  build-macos-native:
+    name: Build macOS Native (.dmg & .zip)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build Universal macOS App & Package DMG/ZIP
+        run: |
+          chmod +x scripts/build_app.sh scripts/package_macos_release.sh
+          ./scripts/package_macos_release.sh
+
+      - name: Upload macOS Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: |
+            releases/OrbitHUD-macOS.dmg
+            releases/OrbitHUD-macOS.zip
+
+  # 2. Build Windows Installer & Portable (.exe)
+  build-windows:
+    name: Build Windows (.exe Installer & Portable)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: cross-platform
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Dependencies & Build Windows Packages
+        run: |
+          npm install
+          npx electron-builder --win nsis portable --x64
+
+      - name: Normalize Windows Artifact Names
+        shell: bash
+        run: |
+          mkdir -p ../releases
+          cp dist/*Setup*.exe ../releases/OrbitHUD-Windows-Setup.exe || cp dist/*.exe ../releases/OrbitHUD-Windows-Setup.exe
+          cp dist/*Portable*.exe ../releases/OrbitHUD-Windows-Portable.exe 2>/dev/null || true
+
+      - name: Upload Windows Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: releases/OrbitHUD-Windows-*.exe
+
+  # 3. Build Linux Packages (.AppImage & .deb)
+  build-linux:
+    name: Build Linux (.AppImage & .deb)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cross-platform
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Dependencies & Build Linux Packages
+        run: |
+          npm install
+          npx electron-builder --linux AppImage deb --x64
+
+      - name: Normalize Linux Artifact Names
+        run: |
+          mkdir -p ../releases
+          cp dist/*.AppImage ../releases/OrbitHUD-Linux-x86_64.AppImage
+          cp dist/*.deb ../releases/OrbitHUD-Linux-amd64.deb
+
+      - name: Upload Linux Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            releases/OrbitHUD-Linux-x86_64.AppImage
+            releases/OrbitHUD-Linux-amd64.deb
+
+  # 4. Publish All OS Installers to GitHub Releases
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-macos-native, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Built Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release & Attach Installers
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name != 'main' && github.ref_name != 'master' && github.ref_name || inputs.tag_name || 'v1.0.0' }}
+          name: "OrbitHUD ${{ github.ref_name != 'main' && github.ref_name != 'master' && github.ref_name || inputs.tag_name || 'v1.0.0' }}"
+          generate_release_notes: true
+          files: |
+            release-assets/OrbitHUD-macOS.dmg
+            release-assets/OrbitHUD-macOS.zip
+            release-assets/OrbitHUD-Windows-*.exe
+            release-assets/OrbitHUD-Linux-x86_64.AppImage
+            release-assets/OrbitHUD-Linux-amd64.deb

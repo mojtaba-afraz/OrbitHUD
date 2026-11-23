@@ -1,0 +1,62 @@
+{
+  "name": "orbithud",
+  "version": "1.0.0",
+  "description": "OrbitHUD — Zero-Gravity Glassmorphic Desktop & Floating Usage Widget for Google Antigravity (Windows, Linux, macOS)",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/quotaFetcher.test.js",
+    "dist:win": "electron-builder --win --x64 --arm64",
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:mac": "electron-builder --mac dmg zip",
+    "dist:all": "electron-builder -mwl"
+  },
+  "keywords": [
+    "antigravity",
+    "usage",
+    "quota",
+    "widget",
+    "windows",
+    "linux",
+    "macos",
+    "electron"
+  ],
+  "author": "Antigravity Community",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.orbithud.antigravity",
+    "productName": "OrbitHUD",
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    }
+  }
+}

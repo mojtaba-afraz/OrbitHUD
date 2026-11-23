@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Antigravity Usage Widget</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="widget-card" class="widget-card">
+    <header class="glass-header">
+      <div class="status-brand">
+        <svg class="orbithud-svg" viewBox="64 64 384 384" width="16" height="16">
+          <circle cx="256" cy="256" r="144" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="34" />
+          <circle cx="256" cy="256" r="144" fill="none" stroke="#3DDB94" stroke-width="34" stroke-linecap="round" stroke-dasharray="700 905" transform="rotate(-90 256 256)" />
+          <circle cx="256" cy="256" r="96" fill="none" stroke="#38BDF8" stroke-width="26" stroke-linecap="round" stroke-dasharray="420 603" transform="rotate(-45 256 256)" />
+          <path d="M256 190 C262 232, 280 250, 322 256 C280 262, 262 280, 256 322 C250 280, 232 262, 190 256 C232 250, 250 232, 256 190 Z" fill="#FFFFFF" />
+        </svg>
+        <span class="brand-name">OrbitHUD</span>
+        <span id="status-dot" class="status-dot live"></span>
+        <span id="mode-badge" class="mode-badge">Float</span>
+      </div>
+
+      <div class="hover-actions">
+        <button id="mode-btn" class="glass-pill-btn" aria-label="Toggle Float or Desktop mode">
+          <span id="mode-btn-text">Pin Desktop</span>
+        </button>
+        <button id="layout-btn" class="glass-icon-btn" aria-label="Toggle Compact Pill View" title="Compact Glass Pill">
+          ⤡
+        </button>
+        <button id="refresh-btn" class="glass-icon-btn" aria-label="Refresh Usage" title="Refresh">
+          ↻
+        </button>
+      </div>
+    </header>
+
+    <main id="bento-container" class="bento-container">
+      <div class="bento-card empty-card">
+        <span>Connecting to Antigravity...</span>
+      </div>
+    </main>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
