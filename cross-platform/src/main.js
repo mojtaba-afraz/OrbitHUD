@@ -8,15 +8,32 @@ const {
   ipcMain,
   screen,
   nativeImage,
+  shell,
 } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 const { fetchLiveQuotaSummary } = require("./quotaFetcher");
+const {
+  checkForUpdate,
+  downloadFileWithProgress,
+  installDownloadedUpdate,
+} = require("./autoUpdater");
 
 let widgetWindow = null;
 let tray = null;
 let refreshTimer = null;
+let updateCheckTimer = null;
+
+let updateState = {
+  status: "idle", // "idle" | "checking" | "available" | "downloading" | "installing" | "error"
+  latestVersion: null,
+  progress: 0,
+  error: null,
+  dismissed: false,
+  asset: null,
+  releaseUrl: null,
+};
 
 const STATE_PATH = path.join(
   os.homedir(),
@@ -55,10 +72,24 @@ function saveState() {
   }
 }
 
+function hasVisibleUpdateBanner() {
+  if (updateState.dismissed) return false;
+  return (
+    updateState.status === "available" ||
+    updateState.status === "downloading" ||
+    updateState.status === "installing" ||
+    updateState.status === "error"
+  );
+}
+
 function getTargetDimensions() {
-  return state.compact
-    ? { width: 356, height: 68 }
-    : { width: 356, height: 280 };
+  if (state.compact) {
+    return { width: 356, height: 68 };
+  }
+  return {
+    width: 356,
+    height: hasVisibleUpdateBanner() ? 316 : 280,
+  };
 }
 
 function getAppIconImage() {
@@ -186,7 +217,104 @@ function sendStateToRenderer() {
     locked: state.locked,
     opacity: state.opacity,
     quotaData: state.lastQuotaData,
+    appVersion: app.getVersion(),
+    update: {
+      status: updateState.status,
+      latestVersion: updateState.latestVersion,
+      progress: updateState.progress,
+      error: updateState.error,
+      dismissed: updateState.dismissed,
+    },
   });
+}
+
+async function runUpdateCheck(manual = false) {
+  if (
+    updateState.status === "downloading" ||
+    updateState.status === "installing"
+  ) {
+    return updateState;
+  }
+  if (manual) {
+    updateState.status = "checking";
+    updateState.error = null;
+    sendStateToRenderer();
+    updateTrayMenu();
+  }
+  try {
+    const info = await checkForUpdate(app.getVersion());
+    if (info && info.available) {
+      updateState = {
+        status: "available",
+        latestVersion: info.latestVersion,
+        progress: 0,
+        error: null,
+        dismissed: false,
+        asset: info.asset,
+        releaseUrl: info.releaseUrl,
+      };
+    } else {
+      updateState.status = "idle";
+      updateState.error = null;
+    }
+  } catch (err) {
+    if (manual) {
+      updateState.status = "error";
+      updateState.error = err?.message || "Update check failed";
+      updateState.dismissed = false;
+    }
+  }
+  applyWindowMode();
+  sendStateToRenderer();
+  updateTrayMenu();
+  return updateState;
+}
+
+async function startAutoUpdateDownload() {
+  if (
+    !updateState.asset ||
+    !updateState.asset.url ||
+    updateState.status === "downloading" ||
+    updateState.status === "installing"
+  ) {
+    return;
+  }
+
+  updateState.status = "downloading";
+  updateState.progress = 0;
+  updateState.error = null;
+  updateState.dismissed = false;
+  applyWindowMode();
+  sendStateToRenderer();
+  updateTrayMenu();
+
+  try {
+    const destDir = path.join(os.tmpdir(), "orbithud-updates");
+    const destPath = path.join(destDir, updateState.asset.name);
+    await downloadFileWithProgress(updateState.asset.url, destPath, (pct) => {
+      updateState.progress = pct;
+      sendStateToRenderer();
+    });
+
+    updateState.status = "installing";
+    updateState.progress = 100;
+    sendStateToRenderer();
+    updateTrayMenu();
+
+    const result = installDownloadedUpdate(destPath);
+    if (result && result.relaunching) {
+      setTimeout(() => app.quit(), 400);
+    } else if (result && result.openPath) {
+      await shell.openPath(result.openPath);
+    } else if (updateState.releaseUrl) {
+      await shell.openExternal(updateState.releaseUrl);
+    }
+  } catch (err) {
+    updateState.status = "error";
+    updateState.error = err?.message || "Download failed";
+    sendStateToRenderer();
+    updateTrayMenu();
+  }
 }
 
 async function refreshQuota() {
@@ -277,6 +405,27 @@ function buildControlMenuTemplate() {
       label: "Refresh Usage Now",
       click: () => refreshQuota(),
     },
+    ...(updateState.status === "available"
+      ? [
+          {
+            label: `Install Update (v${updateState.latestVersion})`,
+            click: () => startAutoUpdateDownload(),
+          },
+        ]
+      : [
+          {
+            label:
+              updateState.status === "downloading"
+                ? `Downloading Update (${updateState.progress}%)...`
+                : updateState.status === "checking"
+                ? "Checking for Updates..."
+                : `Check for Updates (v${app.getVersion()})`,
+            enabled:
+              updateState.status !== "downloading" &&
+              updateState.status !== "installing",
+            click: () => runUpdateCheck(true),
+          },
+        ]),
     { type: "separator" },
     {
       label: "Quit OrbitHUD",
@@ -341,6 +490,20 @@ ipcMain.on("widget:quit", () => {
   app.quit();
 });
 
+ipcMain.handle("widget:check-update", async () => {
+  return runUpdateCheck(true);
+});
+
+ipcMain.on("widget:start-update", () => {
+  startAutoUpdateDownload();
+});
+
+ipcMain.on("widget:dismiss-update", () => {
+  updateState.dismissed = true;
+  applyWindowMode();
+  sendStateToRenderer();
+});
+
 app.whenReady().then(() => {
   if (process.platform === "darwin" && app.dock) {
     app.dock.hide();
@@ -348,6 +511,11 @@ app.whenReady().then(() => {
   createTrayIcon();
   createWidgetWindow();
   refreshTimer = setInterval(refreshQuota, 20000);
+  setTimeout(() => runUpdateCheck(false), 5000);
+  updateCheckTimer = setInterval(
+    () => runUpdateCheck(false),
+    4 * 60 * 60 * 1000
+  );
 });
 
 app.on("window-all-closed", (e) => {

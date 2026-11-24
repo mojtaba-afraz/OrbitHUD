@@ -7,6 +7,10 @@ const {
   formatResetDuration,
   parseQuotaSummaryResponse,
 } = require("../src/quotaFetcher");
+const {
+  compareSemver,
+  selectAssetForPlatform,
+} = require("../src/autoUpdater");
 
 console.log("Running Cross-Platform Antigravity Usage Widget tests...");
 
@@ -142,4 +146,26 @@ assert.equal(parsed.ringItems[4].remainingPercentage, 93);
 assert.equal(parsed.ringItems[4].subtitle, "↻ 6d 22h");
 
 console.log("  ✓ RetrieveUserQuotaSummary parser & iOS ring items mapping passed");
+
+// 4. Test Auto-Updater semver comparison & asset selection
+assert.equal(compareSemver("v1.0.4", "1.0.3") > 0, true);
+assert.equal(compareSemver("1.1.0", "1.0.9") > 0, true);
+assert.equal(compareSemver("v1.0.4", "1.0.4"), 0);
+assert.equal(compareSemver("1.0.2", "1.0.4") < 0, true);
+
+const sampleAssets = [
+  { name: "OrbitHUD-macOS.zip", browser_download_url: "https://example.com/mac.zip" },
+  { name: "OrbitHUD-Windows-Setup.exe", browser_download_url: "https://example.com/setup.exe" },
+  { name: "OrbitHUD-Windows-Portable.exe", browser_download_url: "https://example.com/portable.exe" },
+  { name: "OrbitHUD-Linux-x86_64.AppImage", browser_download_url: "https://example.com/linux.AppImage" },
+];
+assert.equal(selectAssetForPlatform(sampleAssets, "win32", {}).name, "OrbitHUD-Windows-Setup.exe");
+assert.equal(
+  selectAssetForPlatform(sampleAssets, "win32", { PORTABLE_EXECUTABLE_FILE: "C:\\OrbitHUD.exe" }).name,
+  "OrbitHUD-Windows-Portable.exe"
+);
+assert.equal(selectAssetForPlatform(sampleAssets, "linux", { APPIMAGE: "/opt/OrbitHUD.AppImage" }).name, "OrbitHUD-Linux-x86_64.AppImage");
+assert.equal(selectAssetForPlatform(sampleAssets, "darwin", {}).name, "OrbitHUD-macOS.zip");
+console.log("  ✓ Auto-Updater semver & platform asset selection passed");
+
 console.log("✅ All cross-platform tests passed!");

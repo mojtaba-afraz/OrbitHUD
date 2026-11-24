@@ -7,8 +7,10 @@ const layoutBtn = document.getElementById("layout-btn");
 const refreshBtn = document.getElementById("refresh-btn");
 const menuBtn = document.getElementById("menu-btn");
 const quitBtn = document.getElementById("quit-btn");
+const updateBanner = document.getElementById("update-banner");
 const bentoContainer = document.getElementById("bento-container");
 const widgetCard = document.getElementById("widget-card");
+let latestUpdateState = null;
 
 function semanticColor(fraction) {
   if (fraction <= 0.15) return "#FF5252";
@@ -126,6 +128,93 @@ function renderSingleWindowBentoCard(group) {
   `;
 }
 
+function renderUpdateBanner(update) {
+  if (!updateBanner) return;
+  if (
+    !update ||
+    update.dismissed ||
+    (update.status !== "available" &&
+      update.status !== "downloading" &&
+      update.status !== "installing" &&
+      update.status !== "error")
+  ) {
+    updateBanner.classList.add("hidden");
+    updateBanner.innerHTML = "";
+    return;
+  }
+
+  updateBanner.classList.remove("hidden");
+
+  if (update.status === "available") {
+    updateBanner.innerHTML = `
+      <div class="update-info">
+        <span class="update-text">Update v${update.latestVersion} available</span>
+      </div>
+      <div class="update-actions">
+        <button id="banner-update-btn" class="update-action-btn">Update</button>
+        <button id="banner-dismiss-btn" class="update-dismiss-btn" title="Dismiss">✕</button>
+      </div>
+    `;
+    const btn = document.getElementById("banner-update-btn");
+    if (btn) {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.antigravityWidget.startUpdate();
+      });
+    }
+    const dismissBtn = document.getElementById("banner-dismiss-btn");
+    if (dismissBtn) {
+      dismissBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.antigravityWidget.dismissUpdate();
+      });
+    }
+  } else if (update.status === "downloading") {
+    const pct = Math.min(Math.max(update.progress || 0, 0), 100);
+    updateBanner.innerHTML = `
+      <div class="update-info">
+        <span class="update-text">Downloading v${update.latestVersion || ""}... ${pct}%</span>
+        <div class="update-progress-track">
+          <div class="update-progress-fill" style="width:${pct}%"></div>
+        </div>
+      </div>
+    `;
+  } else if (update.status === "installing") {
+    updateBanner.innerHTML = `
+      <div class="update-info">
+        <span class="update-text">Installing update & restarting...</span>
+        <div class="update-progress-track">
+          <div class="update-progress-fill" style="width:100%"></div>
+        </div>
+      </div>
+    `;
+  } else if (update.status === "error") {
+    updateBanner.innerHTML = `
+      <div class="update-info">
+        <span class="update-text">Update error — try again</span>
+      </div>
+      <div class="update-actions">
+        <button id="banner-retry-btn" class="update-action-btn">Retry</button>
+        <button id="banner-dismiss-btn" class="update-dismiss-btn" title="Dismiss">✕</button>
+      </div>
+    `;
+    const retryBtn = document.getElementById("banner-retry-btn");
+    if (retryBtn) {
+      retryBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.antigravityWidget.checkUpdate();
+      });
+    }
+    const dismissBtn = document.getElementById("banner-dismiss-btn");
+    if (dismissBtn) {
+      dismissBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.antigravityWidget.dismissUpdate();
+      });
+    }
+  }
+}
+
 function renderWidget(quotaData, isCompact) {
   widgetCard.classList.toggle("compact-mode", Boolean(isCompact));
 
@@ -196,10 +285,24 @@ function renderWidget(quotaData, isCompact) {
             `;
           })
           .join("")}
+        ${
+          latestUpdateState &&
+          latestUpdateState.status === "available" &&
+          !latestUpdateState.dismissed
+            ? `<button id="pill-update-btn" class="glass-icon-btn update-pill-btn" title="Install Update v${latestUpdateState.latestVersion}">↑</button>`
+            : ""
+        }
         <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
         <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
       </div>
     `;
+    const pillUpdateBtn = document.getElementById("pill-update-btn");
+    if (pillUpdateBtn) {
+      pillUpdateBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.antigravityWidget.startUpdate();
+      });
+    }
     const expandBtn = document.getElementById("expand-pill-btn");
     if (expandBtn) {
       expandBtn.addEventListener("click", (e) => {
@@ -244,6 +347,8 @@ window.antigravityWidget.onStateUpdate((state) => {
   modeBadge.textContent = isFloating ? "Float" : "Desktop";
   modeBtnText.textContent = isFloating ? "Pin Desktop" : "Float Top";
   widgetCard.classList.toggle("locked", Boolean(state.locked));
+  latestUpdateState = state.update || null;
+  renderUpdateBanner(latestUpdateState);
   renderWidget(state.quotaData, state.compact);
 });
 
