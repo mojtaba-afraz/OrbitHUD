@@ -11,5 +11,4 @@ contextBridge.exposeInMainWorld("antigravityWidget", {
   refresh: () => ipcRenderer.invoke("widget:refresh"),
   showMenu: () => ipcRenderer.send("widget:show-menu"),
   quit: () => ipcRenderer.send("widget:quit"),
-  moveBy: (dx, dy) => ipcRenderer.send("widget:move-by", { dx, dy }),
 });

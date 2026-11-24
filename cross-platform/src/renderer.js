@@ -243,6 +243,7 @@ window.antigravityWidget.onStateUpdate((state) => {
   const isFloating = state.mode === "floating";
   modeBadge.textContent = isFloating ? "Float" : "Desktop";
   modeBtnText.textContent = isFloating ? "Pin Desktop" : "Float Top";
+  widgetCard.classList.toggle("locked", Boolean(state.locked));
   renderWidget(state.quotaData, state.compact);
 });
 
@@ -279,30 +280,4 @@ if (quitBtn) {
 window.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   window.antigravityWidget.showMenu();
-});
-
-let isDragging = false;
-let lastScreenX = 0;
-let lastScreenY = 0;
-
-widgetCard.addEventListener("mousedown", (e) => {
-  if (e.button !== 0 || e.target.closest("button")) return;
-  isDragging = true;
-  lastScreenX = e.screenX;
-  lastScreenY = e.screenY;
-});
-
-window.addEventListener("mousemove", (e) => {
-  if (!isDragging) return;
-  const dx = e.screenX - lastScreenX;
-  const dy = e.screenY - lastScreenY;
-  if (dx !== 0 || dy !== 0) {
-    lastScreenX = e.screenX;
-    lastScreenY = e.screenY;
-    window.antigravityWidget.moveBy(dx, dy);
-  }
-});
-
-window.addEventListener("mouseup", () => {
-  isDragging = false;
 });

@@ -88,6 +88,11 @@ function createWidgetWindow() {
   widgetWindow = new BrowserWindow({
     width,
     height,
+    minWidth: width,
+    maxWidth: width,
+    minHeight: height,
+    maxHeight: height,
+    useContentSize: true,
     x: typeof state.x === "number" ? state.x : defaultX,
     y: typeof state.y === "number" ? state.y : defaultY,
     frame: false,
@@ -110,6 +115,19 @@ function createWidgetWindow() {
     },
   });
 
+  if (process.platform === "win32") {
+    // Suppress Windows native titlebar context menu on -webkit-app-region: drag areas
+    // and open OrbitHUD's control menu instead.
+    const WM_INITMENU = 0x0116;
+    widgetWindow.hookWindowMessage(WM_INITMENU, () => {
+      if (!widgetWindow || widgetWindow.isDestroyed()) return;
+      widgetWindow.setEnabled(false);
+      widgetWindow.setEnabled(true);
+      const menu = Menu.buildFromTemplate(buildControlMenuTemplate());
+      menu.popup({ window: widgetWindow });
+    });
+  }
+
   widgetWindow.loadFile(path.join(__dirname, "index.html"));
 
   widgetWindow.on("moved", () => {
@@ -131,11 +149,13 @@ function applyWindowMode() {
   if (!widgetWindow || widgetWindow.isDestroyed()) return;
 
   const { width, height } = getTargetDimensions();
-  const [curW, curH] = widgetWindow.getSize();
+  const [curW, curH] = widgetWindow.getContentSize();
   if (curW !== width || curH !== height) {
-    const [curX, curY] = widgetWindow.getPosition();
-    const newX = curX + (curW - width);
-    widgetWindow.setBounds({ x: newX, y: curY, width, height }, true);
+    widgetWindow.setResizable(true);
+    widgetWindow.setMinimumSize(width, height);
+    widgetWindow.setMaximumSize(width, height);
+    widgetWindow.setContentSize(width, height, false);
+    widgetWindow.setResizable(false);
   }
 
   widgetWindow.setOpacity(state.opacity);
@@ -319,12 +339,6 @@ ipcMain.on("widget:show-menu", () => {
 
 ipcMain.on("widget:quit", () => {
   app.quit();
-});
-
-ipcMain.on("widget:move-by", (_event, { dx, dy }) => {
-  if (!widgetWindow || widgetWindow.isDestroyed() || state.locked) return;
-  const [x, y] = widgetWindow.getPosition();
-  widgetWindow.setPosition(Math.round(x + dx), Math.round(y + dy));
 });
 
 app.whenReady().then(() => {
