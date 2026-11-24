@@ -306,7 +306,7 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
         return all
     }
 
-    private func queryQuotaSummary(scheme: String, connection: LanguageServerConnection) async -> [QuotaGroup]? {
+    private func queryQuotaSummary(scheme: String, connection: LanguageServerConnection, forceRefresh: Bool = true) async -> [QuotaGroup]? {
         guard let url = URL(string: "\(scheme)://127.0.0.1:\(connection.port)/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary") else {
             return nil
         }
@@ -315,11 +315,14 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(connection.csrfToken, forHTTPHeaderField: "x-codeium-csrf-token")
-        request.httpBody = Data("{}".utf8)
+        request.httpBody = Data((forceRefresh ? "{\"forceRefresh\":true}" : "{}").utf8)
 
         do {
             let (data, response) = try await localSession.data(for: request)
             guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else {
+                if forceRefresh {
+                    return await queryQuotaSummary(scheme: scheme, connection: connection, forceRefresh: false)
+                }
                 return nil
             }
             return Self.parseRetrieveUserQuotaSummaryJSON(data)

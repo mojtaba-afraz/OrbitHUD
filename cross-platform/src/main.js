@@ -347,7 +347,7 @@ app.whenReady().then(() => {
   }
   createTrayIcon();
   createWidgetWindow();
-  refreshTimer = setInterval(refreshQuota, 30000);
+  refreshTimer = setInterval(refreshQuota, 20000);
 });
 
 app.on("window-all-closed", (e) => {

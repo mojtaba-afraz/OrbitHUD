@@ -680,9 +680,10 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
   };
 }
 
-function requestQuotaSummary(scheme, port, csrfToken) {
+function requestQuotaSummary(scheme, port, csrfToken, forceRefresh = true) {
   return new Promise((resolve) => {
     const client = scheme === "https" ? https : http;
+    const payload = forceRefresh ? '{"forceRefresh":true}' : "{}";
     const req = client.request(
       {
         protocol: `${scheme}:`,
@@ -695,7 +696,7 @@ function requestQuotaSummary(scheme, port, csrfToken) {
           "x-codeium-csrf-token": csrfToken,
         },
         rejectUnauthorized: false,
-        timeout: 2500,
+        timeout: 4500,
       },
       (res) => {
         if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -723,12 +724,21 @@ function requestQuotaSummary(scheme, port, csrfToken) {
       req.destroy();
       resolve(null);
     });
-    req.write("{}");
+    req.write(payload);
     req.end();
   });
 }
 
-async function fetchLiveQuotaSummary() {
+async function fetchQuotaWithFallback(scheme, port, csrfToken, forceRefresh = true) {
+  const fresh = await requestQuotaSummary(scheme, port, csrfToken, forceRefresh);
+  if (fresh) return fresh;
+  if (forceRefresh) {
+    return requestQuotaSummary(scheme, port, csrfToken, false);
+  }
+  return null;
+}
+
+async function fetchLiveQuotaSummary(forceRefresh = true) {
   const tried = new Set();
 
   // 1. Try fast candidates first (env, daemon/*.json, cached connection) without spawning ps/powershell
@@ -736,7 +746,7 @@ async function fetchLiveQuotaSummary() {
     const key = `${candidate.port}:${candidate.csrfToken}`;
     tried.add(key);
     for (const scheme of ["https", "http"]) {
-      const result = await requestQuotaSummary(scheme, candidate.port, candidate.csrfToken);
+      const result = await fetchQuotaWithFallback(scheme, candidate.port, candidate.csrfToken, forceRefresh);
       if (result) {
         saveCachedConnection(candidate);
         return result;
@@ -750,7 +760,7 @@ async function fetchLiveQuotaSummary() {
     if (tried.has(key)) continue;
     tried.add(key);
     for (const scheme of ["https", "http"]) {
-      const result = await requestQuotaSummary(scheme, candidate.port, candidate.csrfToken);
+      const result = await fetchQuotaWithFallback(scheme, candidate.port, candidate.csrfToken, forceRefresh);
       if (result) {
         saveCachedConnection(candidate);
         return result;
