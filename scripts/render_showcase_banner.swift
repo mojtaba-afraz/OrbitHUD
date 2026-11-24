@@ -173,10 +173,112 @@ func drawBadge(
     return w
 }
 
+func drawProviderLogo(_ cg: CGContext, providerId: String, center: CGPoint, size: CGFloat, color: NSColor) {
+    cg.saveGState()
+    if providerId == "claude-code" {
+        // Claude iconic 12-spoke starburst
+        cg.setFillColor(color.cgColor)
+        let spokeW = max(size * 0.115, 1.5)
+        let spokeH = size * 0.41
+        for i in 0..<12 {
+            cg.saveGState()
+            cg.translateBy(x: center.x, y: center.y)
+            cg.rotate(by: CGFloat(i) * (.pi / 6.0))
+            let rect = CGRect(x: -spokeW / 2, y: -size * 0.46, width: spokeW, height: spokeH)
+            let p = CGPath(roundedRect: rect, cornerWidth: spokeW / 2, cornerHeight: spokeW / 2, transform: nil)
+            cg.addPath(p)
+            cg.fillPath()
+            cg.restoreGState()
+        }
+    } else if providerId == "codex" {
+        // OpenAI / Codex iconic 6-petal hexagonal knot
+        cg.setStrokeColor(color.cgColor)
+        cg.setLineWidth(max(size * 0.105, 1.5))
+        cg.setLineCap(.round)
+        cg.setLineJoin(.round)
+        let s = size / 24.0
+        for i in 0..<6 {
+            cg.saveGState()
+            cg.translateBy(x: center.x, y: center.y)
+            cg.rotate(by: CGFloat(i) * (.pi / 3.0))
+            cg.translateBy(x: -12 * s, y: -12 * s)
+            cg.move(to: CGPoint(x: 12 * s, y: 4.2 * s))
+            cg.addCurve(
+                to: CGPoint(x: 16.4 * s, y: 8.4 * s),
+                control1: CGPoint(x: 14.6 * s, y: 4.2 * s),
+                control2: CGPoint(x: 16.4 * s, y: 6.0 * s)
+            )
+            cg.addLine(to: CGPoint(x: 16.4 * s, y: 12.0 * s))
+            cg.addLine(to: CGPoint(x: 12.0 * s, y: 14.5 * s))
+            cg.strokePath()
+            cg.restoreGState()
+        }
+    } else {
+        // Official Google Antigravity arch glyph (scaled from assets/antigravity-logo.svg 113x113)
+        let s = size / 113.0
+        cg.translateBy(x: center.x - size / 2, y: center.y - size / 2)
+        cg.setFillColor(color.cgColor)
+        cg.move(to: CGPoint(x: 89.6992 * s, y: 93.695 * s))
+        cg.addCurve(
+            to: CGPoint(x: 94.9492 * s, y: 88.445 * s),
+            control1: CGPoint(x: 94.3659 * s, y: 97.195 * s),
+            control2: CGPoint(x: 101.366 * s, y: 94.8617 * s)
+        )
+        cg.addCurve(
+            to: CGPoint(x: 55.8659 * s, y: 18.445 * s),
+            control1: CGPoint(x: 75.6992 * s, y: 69.7783 * s),
+            control2: CGPoint(x: 79.7825 * s, y: 18.445 * s)
+        )
+        cg.addCurve(
+            to: CGPoint(x: 16.7825 * s, y: 88.445 * s),
+            control1: CGPoint(x: 31.9492 * s, y: 18.445 * s),
+            control2: CGPoint(x: 36.0325 * s, y: 69.7783 * s)
+        )
+        cg.addCurve(
+            to: CGPoint(x: 22.0325 * s, y: 93.695 * s),
+            control1: CGPoint(x: 9.78251 * s, y: 95.445 * s),
+            control2: CGPoint(x: 17.3658 * s, y: 97.195 * s)
+        )
+        cg.addCurve(
+            to: CGPoint(x: 55.8659 * s, y: 59.8617 * s),
+            control1: CGPoint(x: 40.1159 * s, y: 81.445 * s),
+            control2: CGPoint(x: 38.9492 * s, y: 59.8617 * s)
+        )
+        cg.addCurve(
+            to: CGPoint(x: 89.6992 * s, y: 93.695 * s),
+            control1: CGPoint(x: 72.7825 * s, y: 59.8617 * s),
+            control2: CGPoint(x: 71.6159 * s, y: 81.445 * s)
+        )
+        cg.closePath()
+        cg.fillPath()
+    }
+    cg.restoreGState()
+}
+
+func drawProviderIconBadge(
+    _ cg: CGContext,
+    providerId: String,
+    origin: CGPoint,
+    accent: NSColor,
+    boxSize: CGFloat = 32
+) -> CGFloat {
+    let rect = CGRect(x: origin.x, y: origin.y, width: boxSize, height: boxSize)
+    drawRoundedRect(
+        cg,
+        rect: rect,
+        radius: 9,
+        fill: accent.withAlphaComponent(0.16),
+        stroke: accent.withAlphaComponent(0.45),
+        lineWidth: 1.2
+    )
+    drawProviderLogo(cg, providerId: providerId, center: CGPoint(x: rect.midX, y: rect.midY), size: boxSize * 0.62, color: accent)
+    return boxSize
+}
+
 func drawBentoCard(
     _ cg: CGContext,
     rect: CGRect,
-    badgeText: String,
+    providerId: String,
     badgeColor: NSColor,
     title: String,
     fiveHFraction: CGFloat,
@@ -202,11 +304,11 @@ func drawBentoCard(
     let contentRight = rect.maxX - 26
     let contentW = contentRight - contentX
 
-    // Top row: provider badge + title + 5h meta
-    let badgeW = drawBadge(cg, text: badgeText, origin: CGPoint(x: contentX, y: rect.minY + 21), accent: badgeColor, fontSize: 15, height: 28)
+    // Top row: provider vector logo badge + title + 5h meta
+    let badgeW = drawProviderIconBadge(cg, providerId: providerId, origin: CGPoint(x: contentX, y: rect.minY + 19), accent: badgeColor, boxSize: 32)
     drawText(
         title,
-        at: CGPoint(x: contentX + badgeW + 10, y: rect.minY + 19),
+        at: CGPoint(x: contentX + badgeW + 11, y: rect.minY + 19),
         fontSize: 26,
         weight: .bold,
         color: .white
@@ -319,21 +421,20 @@ drawText(
     maxWidth: 880
 )
 
-// Provider Legend Pills (Large & Bold)
-let provLabels: [(String, NSColor)] = [
-    ("Antigravity", cEmerald),
-    ("Claude Code", cCoral),
-    ("Codex CLI", cSky)
+// Provider Legend Pills (Large & Bold with Vector Logos)
+let provLabels: [(String, String, NSColor)] = [
+    ("antigravity", "Antigravity", cEmerald),
+    ("claude-code", "Claude Code", cCoral),
+    ("codex", "Codex CLI", cSky)
 ]
 var px = leftX
-for (label, col) in provLabels {
+for (pid, label, col) in provLabels {
     let font = NSFont.systemFont(ofSize: 22, weight: .bold)
-    let w = (label as NSString).size(withAttributes: [.font: font]).width + 52
+    let w = (label as NSString).size(withAttributes: [.font: font]).width + 60
     let pill = CGRect(x: px, y: 604, width: w, height: 48)
     drawRoundedRect(cg, rect: pill, radius: 24, fill: col.withAlphaComponent(0.14), stroke: col.withAlphaComponent(0.45), lineWidth: 1.4)
-    cg.setFillColor(col.cgColor)
-    cg.fillEllipse(in: CGRect(x: pill.minX + 18, y: pill.midY - 6, width: 12, height: 12))
-    drawText(label, at: CGPoint(x: pill.minX + 38, y: pill.minY + 10), fontSize: 22, weight: .bold, color: .white)
+    drawProviderLogo(cg, providerId: pid, center: CGPoint(x: pill.minX + 25, y: pill.midY), size: 21, color: col)
+    drawText(label, at: CGPoint(x: pill.minX + 44, y: pill.minY + 10), fontSize: 22, weight: .bold, color: .white)
     px += w + 16
 }
 
@@ -411,27 +512,26 @@ drawRoundedRect(
     stroke: NSColor(calibratedWhite: 1.0, alpha: 0.15),
     lineWidth: 1.2
 )
-let tabs: [(String, NSColor?, Bool)] = [
-    ("All", nil, true),
-    ("Antigravity", cEmerald, false),
-    ("Claude", cCoral, false),
-    ("Codex", cSky, false)
+let tabs: [(String?, String, NSColor?, Bool)] = [
+    (nil, "All", nil, true),
+    ("antigravity", "Antigravity", cEmerald, false),
+    ("claude-code", "Claude", cCoral, false),
+    ("codex", "Codex", cSky, false)
 ]
 let tabW = (tabBarRect.width - 12) / CGFloat(tabs.count)
 for (idx, tab) in tabs.enumerated() {
     let tx = tabBarRect.minX + 6 + CGFloat(idx) * tabW
     let tr = CGRect(x: tx, y: tabBarRect.minY + 5, width: tabW, height: tabBarRect.height - 10)
-    if tab.2 {
+    if tab.3 {
         drawRoundedRect(cg, rect: tr, radius: 19, fill: NSColor(calibratedWhite: 1.0, alpha: 0.18), stroke: NSColor(calibratedWhite: 1.0, alpha: 0.22), lineWidth: 1.0)
     }
-    if let dotColor = tab.1 {
-        let labelW = (tab.0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 19, weight: .semibold)]).width
-        let startX = tr.midX - (labelW + 17) / 2
-        cg.setFillColor(dotColor.cgColor)
-        cg.fillEllipse(in: CGRect(x: startX, y: tr.midY - 5, width: 10, height: 10))
-        drawText(tab.0, at: CGPoint(x: startX + 16, y: tr.minY + 7), fontSize: 19, weight: .semibold, color: tab.2 ? .white : NSColor(calibratedWhite: 0.90, alpha: 0.84))
+    if let pid = tab.0, let iconColor = tab.2 {
+        let labelW = (tab.1 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 19, weight: .semibold)]).width
+        let startX = tr.midX - (labelW + 24) / 2
+        drawProviderLogo(cg, providerId: pid, center: CGPoint(x: startX + 8, y: tr.midY), size: 17, color: iconColor)
+        drawText(tab.1, at: CGPoint(x: startX + 22, y: tr.minY + 7), fontSize: 19, weight: .semibold, color: tab.3 ? .white : NSColor(calibratedWhite: 0.90, alpha: 0.84))
     } else {
-        drawText(tab.0, at: CGPoint(x: tr.midX, y: tr.minY + 7), fontSize: 19, weight: .bold, color: .white, align: .center, maxWidth: tr.width)
+        drawText(tab.1, at: CGPoint(x: tr.midX, y: tr.minY + 7), fontSize: 19, weight: .bold, color: .white, align: .center, maxWidth: tr.width)
     }
 }
 
@@ -444,7 +544,7 @@ let firstCardY = hudY + 154
 drawBentoCard(
     cg,
     rect: CGRect(x: hudX + 26, y: firstCardY, width: cardW, height: cardH),
-    badgeText: "AGY",
+    providerId: "antigravity",
     badgeColor: cEmerald,
     title: "Gemini Models",
     fiveHFraction: 0.68,
@@ -458,7 +558,7 @@ drawBentoCard(
 drawBentoCard(
     cg,
     rect: CGRect(x: hudX + 26, y: firstCardY + cardH + cardGap, width: cardW, height: cardH),
-    badgeText: "CC",
+    providerId: "claude-code",
     badgeColor: cCoral,
     title: "Claude Code",
     fiveHFraction: 0.34,
@@ -472,7 +572,7 @@ drawBentoCard(
 drawBentoCard(
     cg,
     rect: CGRect(x: hudX + 26, y: firstCardY + (cardH + cardGap) * 2, width: cardW, height: cardH),
-    badgeText: "CDX",
+    providerId: "codex",
     badgeColor: cSky,
     title: "Codex CLI (Plus)",
     fiveHFraction: 0.86,

@@ -213,24 +213,126 @@ enum UsageWidgetLayout {
     }
 }
 
+/// Crisp vector logo for each supported AI coding provider (Antigravity, Claude Code, Codex CLI).
+struct ProviderLogoView: View {
+    let providerId: String
+    var size: CGFloat = 11
+    var color: Color? = nil
+
+    private var resolvedColor: Color {
+        color ?? UsageWidgetLayout.accentColor(for: providerId)
+    }
+
+    var body: some View {
+        Group {
+            switch providerId {
+            case QuotaProviderID.claudeCode.rawValue:
+                claudeStarburst
+            case QuotaProviderID.codex.rawValue:
+                codexHexKnot
+            default:
+                antigravityArch
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var antigravityArch: some View {
+        // Exact scaled path from assets/antigravity-logo.svg (viewBox 0 0 113 113)
+        GeometryReader { geo in
+            let s = min(geo.size.width, geo.size.height) / 113.0
+            Path { p in
+                p.move(to: CGPoint(x: 89.6992 * s, y: 93.695 * s))
+                p.addCurve(
+                    to: CGPoint(x: 94.9492 * s, y: 88.445 * s),
+                    control1: CGPoint(x: 94.3659 * s, y: 97.195 * s),
+                    control2: CGPoint(x: 101.366 * s, y: 94.8617 * s)
+                )
+                p.addCurve(
+                    to: CGPoint(x: 55.8659 * s, y: 18.445 * s),
+                    control1: CGPoint(x: 75.6992 * s, y: 69.7783 * s),
+                    control2: CGPoint(x: 79.7825 * s, y: 18.445 * s)
+                )
+                p.addCurve(
+                    to: CGPoint(x: 16.7825 * s, y: 88.445 * s),
+                    control1: CGPoint(x: 31.9492 * s, y: 18.445 * s),
+                    control2: CGPoint(x: 36.0325 * s, y: 69.7783 * s)
+                )
+                p.addCurve(
+                    to: CGPoint(x: 22.0325 * s, y: 93.695 * s),
+                    control1: CGPoint(x: 9.78251 * s, y: 95.445 * s),
+                    control2: CGPoint(x: 17.3658 * s, y: 97.195 * s)
+                )
+                p.addCurve(
+                    to: CGPoint(x: 55.8659 * s, y: 59.8617 * s),
+                    control1: CGPoint(x: 40.1159 * s, y: 81.445 * s),
+                    control2: CGPoint(x: 38.9492 * s, y: 59.8617 * s)
+                )
+                p.addCurve(
+                    to: CGPoint(x: 89.6992 * s, y: 93.695 * s),
+                    control1: CGPoint(x: 72.7825 * s, y: 59.8617 * s),
+                    control2: CGPoint(x: 71.6159 * s, y: 81.445 * s)
+                )
+                p.closeSubpath()
+            }
+            .fill(resolvedColor)
+        }
+    }
+
+    private var claudeStarburst: some View {
+        ZStack {
+            ForEach(0..<12, id: \.self) { i in
+                Capsule()
+                    .fill(resolvedColor)
+                    .frame(width: max(size * 0.11, 1.1), height: size * 0.42)
+                    .offset(y: -size * 0.25)
+                    .rotationEffect(.degrees(Double(i) * 30.0))
+            }
+        }
+    }
+
+    private var codexHexKnot: some View {
+        ZStack {
+            ForEach(0..<6, id: \.self) { i in
+                Path { p in
+                    let s = size / 24.0
+                    p.move(to: CGPoint(x: 12 * s, y: 4.2 * s))
+                    p.addCurve(
+                        to: CGPoint(x: 16.4 * s, y: 8.4 * s),
+                        control1: CGPoint(x: 14.6 * s, y: 4.2 * s),
+                        control2: CGPoint(x: 16.4 * s, y: 6.0 * s)
+                    )
+                    p.addLine(to: CGPoint(x: 16.4 * s, y: 12.0 * s))
+                    p.addLine(to: CGPoint(x: 12.0 * s, y: 14.5 * s))
+                }
+                .stroke(
+                    resolvedColor,
+                    style: StrokeStyle(lineWidth: max(size * 0.11, 1.1), lineCap: .round, lineJoin: .round)
+                )
+                .rotationEffect(.degrees(Double(i) * 60.0))
+            }
+        }
+    }
+}
+
 /// Segmented glass filter bar shown when 2+ providers are enabled.
 struct ProviderFilterBarView: View {
     @ObservedObject var viewModel: UsageViewModel
 
     var body: some View {
         HStack(spacing: 4) {
-            filterTab(id: "all", title: "All", dotColor: nil)
+            filterTab(id: "all", title: "All", providerId: nil, iconColor: nil)
             ForEach(viewModel.orderedEnabledProviders) { provider in
                 let st = viewModel.providerStatuses[provider]?.state
-                let dotColor: Color = {
+                let iconColor: Color = {
                     if st == .authRequired || st == .rateLimited {
                         return Color(red: 0.98, green: 0.72, blue: 0.22)
                     } else if st == .disconnected {
-                        return Color.white.opacity(0.32)
+                        return Color.white.opacity(0.35)
                     }
                     return UsageWidgetLayout.accentColor(for: provider.rawValue)
                 }()
-                filterTab(id: provider.rawValue, title: provider.shortTabName, dotColor: dotColor)
+                filterTab(id: provider.rawValue, title: provider.shortTabName, providerId: provider.rawValue, iconColor: iconColor)
             }
         }
         .padding(2.5)
@@ -244,7 +346,7 @@ struct ProviderFilterBarView: View {
         )
     }
 
-    private func filterTab(id: String, title: String, dotColor: Color?) -> some View {
+    private func filterTab(id: String, title: String, providerId: String?, iconColor: Color?) -> some View {
         let isActive = viewModel.activeProviderFilter == id
         return Button {
             withAnimation(.easeOut(duration: 0.14)) {
@@ -252,10 +354,8 @@ struct ProviderFilterBarView: View {
             }
         } label: {
             HStack(spacing: 4) {
-                if let dotColor {
-                    Circle()
-                        .fill(dotColor)
-                        .frame(width: 5, height: 5)
+                if let providerId {
+                    ProviderLogoView(providerId: providerId, size: 10.5, color: iconColor)
                 }
                 Text(title)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -321,15 +421,15 @@ struct QuotaBentoContentListView: View {
     private func providerMicroBadge(_ providerId: String) -> some View {
         if showProviderBadge {
             let accent = UsageWidgetLayout.accentColor(for: providerId)
-            Text(UsageWidgetLayout.shortBadge(for: providerId))
-                .font(.system(size: 8.5, weight: .bold, design: .rounded))
-                .foregroundColor(accent)
-                .padding(.horizontal, 4.5)
-                .padding(.vertical, 1)
+            ProviderLogoView(providerId: providerId, size: 11, color: accent)
+                .frame(width: 19, height: 19)
                 .background(
-                    Capsule()
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(accent.opacity(0.14))
-                        .overlay(Capsule().strokeBorder(accent.opacity(0.32), lineWidth: 0.6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(accent.opacity(0.34), lineWidth: 0.6)
+                        )
                 )
         }
     }
@@ -346,15 +446,15 @@ struct QuotaBentoContentListView: View {
                     .fill(dotColor)
                     .frame(width: 5.5, height: 5.5)
 
-                Text(status.providerId.shortBadge)
-                    .font(.system(size: 8.5, weight: .bold, design: .rounded))
-                    .foregroundColor(accent)
-                    .padding(.horizontal, 4.5)
-                    .padding(.vertical, 1)
+                ProviderLogoView(providerId: status.providerId.rawValue, size: 11, color: accent)
+                    .frame(width: 19, height: 19)
                     .background(
-                        Capsule()
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(accent.opacity(0.14))
-                            .overlay(Capsule().strokeBorder(accent.opacity(0.32), lineWidth: 0.6))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(accent.opacity(0.34), lineWidth: 0.6)
+                            )
                     )
 
                 Text(status.message ?? "\(status.providerId.displayName) unavailable")

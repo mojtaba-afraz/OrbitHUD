@@ -84,11 +84,37 @@ function formatShortPillName(title) {
   return cleaned.length > 10 ? `${cleaned.slice(0, 9)}…` : cleaned;
 }
 
+function renderProviderIconSvg(providerId, size = 12) {
+  const pid = providerId || "antigravity";
+  if (pid === "claude-code") {
+    // Claude iconic 12-spoke starburst
+    const spokes = [];
+    for (let i = 0; i < 12; i++) {
+      spokes.push(
+        `<rect x="11.1" y="1.8" width="1.8" height="7.2" rx="0.9" transform="rotate(${i * 30} 12 12)" />`
+      );
+    }
+    return `<svg class="provider-svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true">${spokes.join("")}</svg>`;
+  }
+  if (pid === "codex") {
+    // OpenAI / Codex iconic 6-petal hexagonal knot
+    const petals = [];
+    for (let i = 0; i < 6; i++) {
+      petals.push(
+        `<path d="M12 4.2 C14.6 4.2 16.4 6 16.4 8.4 L16.4 12 L12 14.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" transform="rotate(${i * 60} 12 12)" />`
+      );
+    }
+    return `<svg class="provider-svg" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${petals.join("")}</svg>`;
+  }
+  // Official Google Antigravity arch glyph (from assets/antigravity-logo.svg)
+  return `<svg class="provider-svg" viewBox="0 0 113 113" width="${size}" height="${size}" fill="currentColor" aria-hidden="true"><path d="M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z"/></svg>`;
+}
+
 function renderProviderBadge(providerId, showBadge) {
   if (!showBadge) return "";
   const pid = providerId || "antigravity";
-  const meta = latestProviderMeta[pid] || { shortName: pid.slice(0, 3).toUpperCase(), accentColor: "#94A3B8" };
-  return `<span class="provider-badge" style="color:${meta.accentColor};border-color:${meta.accentColor}44;background:${meta.accentColor}1a">${meta.shortName}</span>`;
+  const meta = latestProviderMeta[pid] || { name: pid, accentColor: "#94A3B8" };
+  return `<span class="provider-icon-badge" title="${meta.name}" style="color:${meta.accentColor};border-color:${meta.accentColor}44;background:${meta.accentColor}1a">${renderProviderIconSvg(pid, 11)}</span>`;
 }
 
 function renderProviderTabs(enabledProviders, activeFilter, providerStatuses, isCompact) {
@@ -101,19 +127,23 @@ function renderProviderTabs(enabledProviders, activeFilter, providerStatuses, is
 
   providerTabsEl.classList.remove("hidden");
   const tabs = [
-    { id: "all", label: "All", dotColor: null },
+    { id: "all", label: "All", iconHtml: "" },
     ...enabledProviders.map((id) => {
       const meta = latestProviderMeta[id] || { name: id, accentColor: "#94A3B8" };
       const st = providerStatuses?.[id]?.status;
-      const dotColor =
+      const iconColor =
         st === "auth_required" || st === "rate_limited"
           ? "#FAB838"
           : st === "disconnected"
-          ? "rgba(255,255,255,0.3)"
+          ? "rgba(255,255,255,0.35)"
           : meta.accentColor;
       const shortTab =
         id === "claude-code" ? "Claude" : id === "codex" ? "Codex" : meta.name;
-      return { id, label: shortTab, dotColor };
+      return {
+        id,
+        label: shortTab,
+        iconHtml: `<span class="provider-tab-icon" style="color:${iconColor}">${renderProviderIconSvg(id, 10.5)}</span>`,
+      };
     }),
   ];
 
@@ -121,7 +151,7 @@ function renderProviderTabs(enabledProviders, activeFilter, providerStatuses, is
     .map(
       (t) => `
       <button class="provider-tab ${activeFilter === t.id ? "active" : ""}" data-provider-filter="${t.id}">
-        ${t.dotColor ? `<span class="provider-dot" style="background:${t.dotColor}"></span>` : ""}
+        ${t.iconHtml}
         <span>${t.label}</span>
       </button>
     `
@@ -238,7 +268,7 @@ function renderProviderStatusCard(statusObj) {
     <div class="bento-card provider-status-card">
       <div class="provider-status-left">
         <span class="provider-dot" style="background:${dotColor}"></span>
-        <span class="provider-badge" style="color:${accent};border-color:${accent}44;background:${accent}1a">${statusObj.shortName}</span>
+        <span class="provider-icon-badge" title="${statusObj.name}" style="color:${accent};border-color:${accent}44;background:${accent}1a">${renderProviderIconSvg(statusObj.id, 11)}</span>
         <span class="provider-status-msg">${statusObj.message || `${statusObj.name} disconnected`}</span>
       </div>
     </div>
