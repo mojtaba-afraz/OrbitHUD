@@ -117,6 +117,12 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Generate SHA256 Checksums
+        run: |
+          cd release-assets
+          sha256sum OrbitHUD-macOS.dmg OrbitHUD-macOS.zip OrbitHUD-Windows-*.exe OrbitHUD-Linux-x86_64.AppImage OrbitHUD-Linux-amd64.deb > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create GitHub Release & Attach Installers
         uses: softprops/action-gh-release@v2
         with:
@@ -129,3 +135,4 @@ jobs:
             release-assets/OrbitHUD-Windows-*.exe
             release-assets/OrbitHUD-Linux-x86_64.AppImage
             release-assets/OrbitHUD-Linux-amd64.deb
+            release-assets/SHA256SUMS.txt

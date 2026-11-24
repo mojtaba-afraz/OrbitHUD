@@ -13,12 +13,15 @@ const {
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
-const { fetchLiveQuotaSummary } = require("./quotaFetcher");
+const { ProviderManager } = require("./providers/providerManager");
+const { PROVIDER_META, PROVIDER_ORDER } = require("./providers/types");
 const {
   checkForUpdate,
   downloadFileWithProgress,
   installDownloadedUpdate,
 } = require("./autoUpdater");
+
+const providerManager = new ProviderManager();
 
 let widgetWindow = null;
 let tray = null;
@@ -49,6 +52,8 @@ const DEFAULT_STATE = {
   opacity: 0.96,
   x: null,
   y: null,
+  enabledProviders: ["antigravity"],
+  activeProviderFilter: "all",
   hiddenGroupIds: [],
   lastQuotaData: null,
 };
@@ -64,6 +69,18 @@ function loadState() {
     merged.hiddenGroupIds = Array.isArray(merged.hiddenGroupIds)
       ? merged.hiddenGroupIds.filter((id) => typeof id === "string")
       : [];
+    merged.enabledProviders = Array.isArray(merged.enabledProviders)
+      ? PROVIDER_ORDER.filter((id) => merged.enabledProviders.includes(id))
+      : ["antigravity"];
+    if (merged.enabledProviders.length === 0) {
+      merged.enabledProviders = ["antigravity"];
+    }
+    if (
+      merged.activeProviderFilter !== "all" &&
+      !merged.enabledProviders.includes(merged.activeProviderFilter)
+    ) {
+      merged.activeProviderFilter = "all";
+    }
     return merged;
   } catch {
     return { ...DEFAULT_STATE };
@@ -73,13 +90,61 @@ function loadState() {
 function getVisibleGroups() {
   const groups = state.lastQuotaData?.groups || [];
   const hidden = new Set(state.hiddenGroupIds || []);
-  return groups.filter((g) => !hidden.has(g.id));
+  const filter = state.activeProviderFilter || "all";
+  return groups.filter((g) => {
+    if (hidden.has(g.id)) return false;
+    const pid = g.providerId || "antigravity";
+    if (!state.enabledProviders.includes(pid)) return false;
+    if (filter !== "all" && pid !== filter) return false;
+    return true;
+  });
 }
 
 function getVisibleRingItems() {
   const items = state.lastQuotaData?.ringItems || [];
   const hidden = new Set(state.hiddenGroupIds || []);
-  return items.filter((it) => !it.groupId || !hidden.has(it.groupId));
+  const filter = state.activeProviderFilter || "all";
+  return items.filter((it) => {
+    if (it.groupId && hidden.has(it.groupId)) return false;
+    const pid = it.providerId || "antigravity";
+    if (!state.enabledProviders.includes(pid)) return false;
+    if (filter !== "all" && pid !== filter) return false;
+    return true;
+  });
+}
+
+function toggleProvider(providerId) {
+  if (!PROVIDER_ORDER.includes(providerId)) return;
+  const set = new Set(state.enabledProviders || ["antigravity"]);
+  if (set.has(providerId)) {
+    if (set.size <= 1) return; // Always keep at least one provider enabled
+    set.delete(providerId);
+  } else {
+    set.add(providerId);
+  }
+  state.enabledProviders = PROVIDER_ORDER.filter((id) => set.has(id));
+  if (
+    state.activeProviderFilter !== "all" &&
+    !state.enabledProviders.includes(state.activeProviderFilter)
+  ) {
+    state.activeProviderFilter = "all";
+  }
+  measuredBentoHeight = null;
+  saveState();
+  applyWindowMode();
+  sendStateToRenderer();
+  refreshQuota(true);
+}
+
+function setProviderFilter(filterId) {
+  if (filterId !== "all" && !state.enabledProviders.includes(filterId)) {
+    return;
+  }
+  state.activeProviderFilter = filterId;
+  measuredBentoHeight = null;
+  saveState();
+  applyWindowMode();
+  sendStateToRenderer();
 }
 
 function toggleGroupVisibility(groupId) {
@@ -131,13 +196,14 @@ function computeEstimatedBentoHeight() {
   const allGroups = state.lastQuotaData?.groups || [];
   const visibleGroups = getVisibleGroups();
   const bannerExtra = hasVisibleUpdateBanner() ? 42 : 0;
+  const tabsExtra = (state.enabledProviders || []).length > 1 ? 30 : 0;
 
   if (allGroups.length === 0 || visibleGroups.length === 0) {
-    return 108 + bannerExtra;
+    return 108 + bannerExtra + tabsExtra;
   }
 
   // Outer card padding (28) + header (22) + gap (10)
-  let h = 60 + bannerExtra;
+  let h = 60 + bannerExtra + tabsExtra;
   visibleGroups.forEach((group, idx) => {
     const isDual = Array.isArray(group.buckets) && group.buckets.length >= 2;
     h += isDual ? 80 : 72;
@@ -300,6 +366,9 @@ function sendStateToRenderer() {
     compact: state.compact,
     locked: state.locked,
     opacity: state.opacity,
+    enabledProviders: state.enabledProviders,
+    activeProviderFilter: state.activeProviderFilter,
+    providerMeta: PROVIDER_META,
     hiddenGroupIds: state.hiddenGroupIds,
     quotaData: state.lastQuotaData,
     appVersion: app.getVersion(),
@@ -402,12 +471,29 @@ async function startAutoUpdateDownload() {
   }
 }
 
-async function refreshQuota() {
+async function refreshQuota(force = false) {
   const prevCount = state.lastQuotaData?.groups?.length || 0;
-  const live = await fetchLiveQuotaSummary();
-  if (live) {
-    state.lastQuotaData = live;
-    if ((live.groups?.length || 0) !== prevCount) {
+  const merged = await providerManager.refresh(state.enabledProviders, { force });
+  if (merged) {
+    // Preserve last known Antigravity groups if temporarily disconnected during IDE restart
+    if (
+      state.enabledProviders.includes("antigravity") &&
+      merged.providerStatuses?.antigravity?.status === "disconnected" &&
+      !merged.groups.some((g) => (g.providerId || "antigravity") === "antigravity") &&
+      state.lastQuotaData?.groups?.some((g) => (g.providerId || "antigravity") === "antigravity")
+    ) {
+      const prevAgyGroups = state.lastQuotaData.groups.filter(
+        (g) => (g.providerId || "antigravity") === "antigravity"
+      );
+      const prevAgyRings = (state.lastQuotaData.ringItems || []).filter(
+        (it) => (it.providerId || "antigravity") === "antigravity"
+      );
+      merged.groups = [...prevAgyGroups, ...merged.groups];
+      merged.ringItems = [...prevAgyRings, ...merged.ringItems];
+    }
+
+    state.lastQuotaData = merged;
+    if ((merged.groups?.length || 0) !== prevCount) {
       measuredBentoHeight = null;
       applyWindowMode();
     }
@@ -420,6 +506,7 @@ async function refreshQuota() {
 function buildControlMenuTemplate() {
   const allGroups = state.lastQuotaData?.groups || [];
   const hiddenSet = new Set(state.hiddenGroupIds || []);
+  const enabledSet = new Set(state.enabledProviders || ["antigravity"]);
   const items = getVisibleRingItems();
   const summaryLines =
     items.length > 0
@@ -432,20 +519,44 @@ function buildControlMenuTemplate() {
             label:
               allGroups.length > 0
                 ? "All models hidden (enable in Visible Models)"
-                : "Waiting for Antigravity live quota...",
+                : "Waiting for live quota...",
             enabled: false,
           },
         ];
 
+  const providersSubmenu = PROVIDER_ORDER.map((id) => {
+    const meta = PROVIDER_META[id];
+    const isEnabled = enabledSet.has(id);
+    const statusObj = state.lastQuotaData?.providerStatuses?.[id];
+    const statusTag =
+      isEnabled && statusObj?.status === "auth_required"
+        ? " (Login needed)"
+        : isEnabled && statusObj?.status === "rate_limited"
+        ? " (Rate limited)"
+        : "";
+    return {
+      label: `${meta.name}${statusTag}`,
+      type: "checkbox",
+      checked: isEnabled,
+      enabled: !(isEnabled && enabledSet.size <= 1),
+      click: () => toggleProvider(id),
+    };
+  });
+
+  const multiProvider = enabledSet.size > 1;
   const visibleModelsSubmenu =
     allGroups.length > 0
       ? [
-          ...allGroups.map((g) => ({
-            label: g.displayName,
-            type: "checkbox",
-            checked: !hiddenSet.has(g.id),
-            click: () => toggleGroupVisibility(g.id),
-          })),
+          ...allGroups.map((g) => {
+            const pid = g.providerId || "antigravity";
+            const prefix = multiProvider ? `[${PROVIDER_META[pid]?.shortName || pid}] ` : "";
+            return {
+              label: `${prefix}${g.displayName}`,
+              type: "checkbox",
+              checked: !hiddenSet.has(g.id),
+              click: () => toggleGroupVisibility(g.id),
+            };
+          }),
           ...(hiddenSet.size > 0
             ? [
                 { type: "separator" },
@@ -459,10 +570,14 @@ function buildControlMenuTemplate() {
       : [{ label: "No models detected yet", enabled: false }];
 
   return [
-    { label: "OrbitHUD — Antigravity Usage", enabled: false },
+    { label: "OrbitHUD — AI Usage HUD", enabled: false },
     { type: "separator" },
     ...summaryLines,
     { type: "separator" },
+    {
+      label: "Providers",
+      submenu: providersSubmenu,
+    },
     {
       label: "Visible Models",
       submenu: visibleModelsSubmenu,
@@ -530,7 +645,7 @@ function buildControlMenuTemplate() {
     },
     {
       label: "Refresh Usage Now",
-      click: () => refreshQuota(),
+      click: () => refreshQuota(true),
     },
     ...(updateState.status === "available"
       ? [
@@ -566,7 +681,7 @@ function createTrayIcon() {
     const img = getAppIconImage();
     if (img.isEmpty()) return;
     tray = new Tray(img.resize({ width: 16, height: 16 }));
-    tray.setToolTip("OrbitHUD — Antigravity Usage Widget");
+    tray.setToolTip("OrbitHUD — AI Usage & Quota HUD");
     tray.on("click", () => {
       if (widgetWindow && !widgetWindow.isDestroyed()) {
         widgetWindow.show();
@@ -623,8 +738,18 @@ ipcMain.on("widget:sync-height", (_event, cardHeight) => {
   }
 });
 
+ipcMain.handle("widget:toggle-provider", (_event, providerId) => {
+  toggleProvider(providerId);
+  return state;
+});
+
+ipcMain.handle("widget:set-provider-filter", (_event, filterId) => {
+  setProviderFilter(filterId);
+  return state;
+});
+
 ipcMain.handle("widget:refresh", async () => {
-  await refreshQuota();
+  await refreshQuota(true);
   return state;
 });
 

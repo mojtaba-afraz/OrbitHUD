@@ -30,6 +30,7 @@ public enum WidgetDisplayMode: String, CaseIterable, Codable, Identifiable {
 public struct QuotaRingItem: Identifiable, Equatable {
     public let id: String
     public let groupId: String
+    public let providerId: String
     public let title: String
     public let subtitle: String
     public let remainingFraction: Double
@@ -38,6 +39,7 @@ public struct QuotaRingItem: Identifiable, Equatable {
     public init(
         id: String,
         groupId: String = "",
+        providerId: String = "antigravity",
         title: String,
         subtitle: String,
         remainingFraction: Double,
@@ -45,6 +47,7 @@ public struct QuotaRingItem: Identifiable, Equatable {
     ) {
         self.id = id
         self.groupId = groupId
+        self.providerId = providerId
         self.title = title
         self.subtitle = subtitle
         self.remainingFraction = min(max(remainingFraction, 0.0), 1.0)
@@ -133,15 +136,36 @@ public struct QuotaBucket: Identifiable, Codable, Equatable {
 
 public struct QuotaGroup: Identifiable, Codable, Equatable {
     public let id: String
+    public let providerId: String
     public let displayName: String
     public let description: String?
     public let buckets: [QuotaBucket]
 
-    public init(id: String, displayName: String, description: String? = nil, buckets: [QuotaBucket]) {
+    public init(
+        id: String,
+        providerId: String = "antigravity",
+        displayName: String,
+        description: String? = nil,
+        buckets: [QuotaBucket]
+    ) {
         self.id = id
+        self.providerId = providerId
         self.displayName = displayName
         self.description = description
         self.buckets = buckets
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, providerId, displayName, description, buckets
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.providerId = try container.decodeIfPresent(String.self, forKey: .providerId) ?? "antigravity"
+        self.displayName = try container.decode(String.self, forKey: .displayName)
+        self.description = try container.decodeIfPresent(String.self, forKey: .description)
+        self.buckets = try container.decode([QuotaBucket].self, forKey: .buckets)
     }
 }
 
@@ -294,7 +318,60 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
         for group in quotaGroups {
             let lowerName = group.displayName.lowercased()
 
-            if lowerName.contains("gemini models") || (lowerName.contains("gemini") && !lowerName.contains("argon") && group.buckets.contains(where: { $0.window.lowercased() == "5h" })) {
+            if group.providerId == "claude-code" {
+                let sortedBuckets = group.buckets.sorted { a, _ in a.window.lowercased() == "5h" }
+                for bucket in sortedBuckets {
+                    let is5h = bucket.window.lowercased() == "5h"
+                    let title: String
+                    if lowerName.contains("sonnet") {
+                        title = "CC Sonnet"
+                    } else if lowerName.contains("opus") {
+                        title = "CC Opus"
+                    } else {
+                        title = is5h ? "CC 5h" : "CC Wk"
+                    }
+                    let sub: String
+                    if bucket.remainingPercentage < 100, let dur = bucket.formattedResetDuration(relativeTo: now) {
+                        sub = "↻ \(dur)"
+                    } else {
+                        sub = is5h ? "5h limit" : "Weekly"
+                    }
+                    items.append(
+                        QuotaRingItem(
+                            id: bucket.id,
+                            groupId: group.id,
+                            providerId: group.providerId,
+                            title: title,
+                            subtitle: sub,
+                            remainingFraction: bucket.remainingFraction,
+                            category: "claude-code"
+                        )
+                    )
+                }
+            } else if group.providerId == "codex" {
+                let sortedBuckets = group.buckets.sorted { a, _ in a.window.lowercased() == "5h" }
+                for bucket in sortedBuckets {
+                    let is5h = bucket.window.lowercased() == "5h"
+                    let title = is5h ? "CDX 5h" : "CDX Wk"
+                    let sub: String
+                    if bucket.remainingPercentage < 100, let dur = bucket.formattedResetDuration(relativeTo: now) {
+                        sub = "↻ \(dur)"
+                    } else {
+                        sub = is5h ? "5h limit" : "Weekly"
+                    }
+                    items.append(
+                        QuotaRingItem(
+                            id: bucket.id,
+                            groupId: group.id,
+                            providerId: group.providerId,
+                            title: title,
+                            subtitle: sub,
+                            remainingFraction: bucket.remainingFraction,
+                            category: "codex"
+                        )
+                    )
+                }
+            } else if lowerName.contains("gemini models") || (lowerName.contains("gemini") && !lowerName.contains("argon") && group.buckets.contains(where: { $0.window.lowercased() == "5h" })) {
                 let sortedBuckets = group.buckets.sorted { a, _ in a.window.lowercased() == "5h" }
                 for bucket in sortedBuckets {
                     let is5h = bucket.window.lowercased() == "5h"
@@ -309,6 +386,7 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
                         QuotaRingItem(
                             id: bucket.id,
                             groupId: group.id,
+                            providerId: group.providerId,
                             title: title,
                             subtitle: sub,
                             remainingFraction: bucket.remainingFraction,
@@ -328,6 +406,7 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
                         QuotaRingItem(
                             id: bucket.id,
                             groupId: group.id,
+                            providerId: group.providerId,
                             title: "Argon 4",
                             subtitle: sub,
                             remainingFraction: bucket.remainingFraction,
@@ -350,6 +429,7 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
                         QuotaRingItem(
                             id: bucket.id,
                             groupId: group.id,
+                            providerId: group.providerId,
                             title: title,
                             subtitle: sub,
                             remainingFraction: bucket.remainingFraction,
@@ -373,6 +453,7 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
                         QuotaRingItem(
                             id: bucket.id,
                             groupId: group.id,
+                            providerId: group.providerId,
                             title: title,
                             subtitle: sub,
                             remainingFraction: bucket.remainingFraction,

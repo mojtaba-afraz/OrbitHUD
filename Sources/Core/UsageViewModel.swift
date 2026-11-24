@@ -41,16 +41,83 @@ public final class UsageViewModel: ObservableObject {
             onWindowConfigChanged?()
         }
     }
+    @Published public var enabledProviders: Set<QuotaProviderID> {
+        didSet {
+            UserDefaults.standard.set(enabledProviders.map(\.rawValue), forKey: "enabledProviders_v1")
+            onWindowConfigChanged?()
+        }
+    }
+    @Published public var activeProviderFilter: String {
+        didSet {
+            UserDefaults.standard.set(activeProviderFilter, forKey: "activeProviderFilter_v1")
+            onWindowConfigChanged?()
+        }
+    }
+    @Published public var providerStatuses: [QuotaProviderID: ProviderStatusInfo] = [:]
     @Published public var isRefreshing: Bool = false
     @Published public var isWidgetHovered: Bool = false
     @Published public var hoveredCardId: String? = nil
 
+    public var orderedEnabledProviders: [QuotaProviderID] {
+        QuotaProviderID.allCases.filter { enabledProviders.contains($0) }
+    }
+
     public var visibleQuotaGroups: [QuotaGroup] {
-        snapshot.quotaGroups.filter { !hiddenGroupIds.contains($0.id) }
+        snapshot.quotaGroups.filter { group in
+            guard !hiddenGroupIds.contains(group.id) else { return false }
+            guard let pid = QuotaProviderID(rawValue: group.providerId),
+                  enabledProviders.contains(pid) else { return false }
+            if activeProviderFilter != "all" && group.providerId != activeProviderFilter {
+                return false
+            }
+            return true
+        }
+    }
+
+    public var visibleStatusCards: [ProviderStatusInfo] {
+        orderedEnabledProviders.compactMap { pid in
+            if activeProviderFilter != "all" && pid.rawValue != activeProviderFilter {
+                return nil
+            }
+            guard let status = providerStatuses[pid], status.state != .connected else { return nil }
+            let hasLiveCards = visibleQuotaGroups.contains { $0.providerId == pid.rawValue }
+            if hasLiveCards && status.state != .rateLimited { return nil }
+            if status.state == .authRequired || status.state == .rateLimited || activeProviderFilter == pid.rawValue {
+                return status
+            }
+            return nil
+        }
     }
 
     public func isGroupVisible(_ groupId: String) -> Bool {
         groupId.isEmpty || !hiddenGroupIds.contains(groupId)
+    }
+
+    public func isRingItemVisible(_ item: QuotaRingItem) -> Bool {
+        guard isGroupVisible(item.groupId) else { return false }
+        guard let pid = QuotaProviderID(rawValue: item.providerId),
+              enabledProviders.contains(pid) else { return false }
+        if activeProviderFilter != "all" && item.providerId != activeProviderFilter {
+            return false
+        }
+        return true
+    }
+
+    public func toggleProvider(_ provider: QuotaProviderID) {
+        if enabledProviders.contains(provider) {
+            guard enabledProviders.count > 1 else { return }
+            enabledProviders.remove(provider)
+            if activeProviderFilter == provider.rawValue {
+                activeProviderFilter = "all"
+            }
+        } else {
+            enabledProviders.insert(provider)
+        }
+        Task { await refreshNow(forceExternal: true) }
+    }
+
+    public func setProviderFilter(_ filter: String) {
+        activeProviderFilter = filter
     }
 
     public func toggleGroupVisibility(_ groupId: String) {
@@ -68,8 +135,11 @@ public final class UsageViewModel: ObservableObject {
     public var onWindowConfigChanged: (() -> Void)?
 
     private let quotaFetcher = LanguageServerQuotaFetcher()
+    private let claudeFetcher = ClaudeCodeQuotaFetcher()
+    private let codexFetcher = CodexQuotaFetcher()
     private let transcriptAggregator = TranscriptUsageAggregator()
     private var refreshTimer: Timer?
+    private var externalCache: [QuotaProviderID: (groups: [QuotaGroup], status: ProviderStatusInfo, nextAllowedAt: Date)] = [:]
 
     public init() {
         let savedMode = UserDefaults.standard.string(forKey: "displayMode_v3")
@@ -83,6 +153,16 @@ public final class UsageViewModel: ObservableObject {
         self.refreshIntervalSeconds = savedInterval >= 10 ? savedInterval : 30
         let savedHidden = UserDefaults.standard.stringArray(forKey: "hiddenGroupIds_v1") ?? []
         self.hiddenGroupIds = Set(savedHidden)
+        let savedProvidersRaw = UserDefaults.standard.stringArray(forKey: "enabledProviders_v1") ?? [QuotaProviderID.antigravity.rawValue]
+        let parsedProviders = Set(savedProvidersRaw.compactMap(QuotaProviderID.init(rawValue:)))
+        let initialProviders: Set<QuotaProviderID> = parsedProviders.isEmpty ? [.antigravity] : parsedProviders
+        self.enabledProviders = initialProviders
+        let savedFilter = UserDefaults.standard.string(forKey: "activeProviderFilter_v1") ?? "all"
+        if savedFilter == "all" || (QuotaProviderID(rawValue: savedFilter).map({ initialProviders.contains($0) }) ?? false) {
+            self.activeProviderFilter = savedFilter
+        } else {
+            self.activeProviderFilter = "all"
+        }
 
         if let loaded = SharedSnapshotStorage.load(), !loaded.quotaGroups.isEmpty {
             self.snapshot = loaded
@@ -113,42 +193,95 @@ public final class UsageViewModel: ObservableObject {
         }
     }
 
-    public func refreshNow() async {
+    public func refreshNow(forceExternal: Bool = false) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
-        async let liveGroupsTask = quotaFetcher.fetchLiveQuotaGroups()
-        let aggregator = self.transcriptAggregator
-        async let tokenUsageTask = Task.detached(priority: .utility) {
-            aggregator.collectUsageSummary()
-        }.value
+        let now = Date()
+        let activeProviders = self.enabledProviders
 
-        let liveGroups = await liveGroupsTask
-        let tokenUsage = await tokenUsageTask
+        let agyTask: Task<[QuotaGroup]?, Never> = Task {
+            guard activeProviders.contains(.antigravity) else { return nil }
+            return await self.quotaFetcher.fetchLiveQuotaGroups()
+        }
 
-        if let liveGroups, !liveGroups.isEmpty {
-            let prevIds = self.snapshot.quotaGroups.map(\.id)
-            let newSnapshot = AntigravityUsageSnapshot(
-                timestamp: Date(),
-                isLanguageServerConnected: true,
-                quotaGroups: liveGroups,
-                modelQuotas: [],
-                tokenUsage: tokenUsage,
-                statusMessage: "Live"
-            )
-            self.snapshot = newSnapshot
-            SharedSnapshotStorage.save(newSnapshot)
-            if liveGroups.map(\.id) != prevIds {
-                onWindowConfigChanged?()
+        let claudeTask: Task<ExternalProviderFetchResult?, Never> = Task {
+            guard activeProviders.contains(.claudeCode) else { return nil }
+            if !forceExternal, let cached = await MainActor.run(body: { self.externalCache[.claudeCode] }), now < cached.nextAllowedAt {
+                return ExternalProviderFetchResult(groups: cached.groups, status: cached.status)
             }
-        } else if !self.snapshot.quotaGroups.isEmpty {
-            var cached = self.snapshot
-            cached.timestamp = Date()
-            cached.isLanguageServerConnected = false
-            cached.tokenUsage = tokenUsage
-            cached.statusMessage = "Cached"
-            self.snapshot = cached
+            return await self.claudeFetcher.fetchLiveQuota()
+        }
+
+        let codexTask: Task<ExternalProviderFetchResult?, Never> = Task {
+            guard activeProviders.contains(.codex) else { return nil }
+            if !forceExternal, let cached = await MainActor.run(body: { self.externalCache[.codex] }), now < cached.nextAllowedAt {
+                return ExternalProviderFetchResult(groups: cached.groups, status: cached.status)
+            }
+            return await self.codexFetcher.fetchLiveQuota()
+        }
+
+        let aggregator = self.transcriptAggregator
+        let tokenUsageTask = Task.detached(priority: .utility) {
+            aggregator.collectUsageSummary()
+        }
+
+        let liveAgyGroups = await agyTask.value
+        let claudeRes = await claudeTask.value
+        let codexRes = await codexTask.value
+        let tokenUsage = await tokenUsageTask.value
+
+        var mergedGroups: [QuotaGroup] = []
+        var newStatuses: [QuotaProviderID: ProviderStatusInfo] = [:]
+        var agyConnected = false
+
+        if activeProviders.contains(.antigravity) {
+            if let liveAgyGroups, !liveAgyGroups.isEmpty {
+                agyConnected = true
+                mergedGroups.append(contentsOf: liveAgyGroups)
+                newStatuses[.antigravity] = ProviderStatusInfo(providerId: .antigravity, state: .connected)
+            } else {
+                let cachedAgy = self.snapshot.quotaGroups.filter { $0.providerId == QuotaProviderID.antigravity.rawValue }
+                mergedGroups.append(contentsOf: cachedAgy)
+                newStatuses[.antigravity] = ProviderStatusInfo(
+                    providerId: .antigravity,
+                    state: .disconnected,
+                    message: "Waiting for Antigravity live quota..."
+                )
+            }
+        }
+
+        for (pid, res) in [(QuotaProviderID.claudeCode, claudeRes), (QuotaProviderID.codex, codexRes)] {
+            guard activeProviders.contains(pid), let res else { continue }
+            var groupsToUse = res.groups
+            if res.status.state == .rateLimited, groupsToUse.isEmpty, let prev = externalCache[pid], !prev.groups.isEmpty {
+                groupsToUse = prev.groups
+            }
+            let backoff = res.retryAfterSeconds > 0 ? res.retryAfterSeconds : pid.defaultPollInterval
+            externalCache[pid] = (groupsToUse, res.status, Date().addingTimeInterval(backoff))
+            newStatuses[pid] = res.status
+            mergedGroups.append(contentsOf: groupsToUse)
+        }
+
+        let prevIds = self.snapshot.quotaGroups.map(\.id)
+        let prevStatusCount = self.visibleStatusCards.count
+        self.providerStatuses = newStatuses
+
+        let newSnapshot = AntigravityUsageSnapshot(
+            timestamp: Date(),
+            isLanguageServerConnected: agyConnected || newStatuses.values.contains(where: { $0.state == .connected }),
+            quotaGroups: mergedGroups,
+            modelQuotas: [],
+            tokenUsage: tokenUsage,
+            statusMessage: agyConnected ? "Live" : "Synced"
+        )
+        self.snapshot = newSnapshot
+        if !mergedGroups.isEmpty {
+            SharedSnapshotStorage.save(newSnapshot)
+        }
+        if mergedGroups.map(\.id) != prevIds || self.visibleStatusCards.count != prevStatusCount {
+            onWindowConfigChanged?()
         }
     }
 }

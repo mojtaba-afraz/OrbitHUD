@@ -11,6 +11,15 @@ const {
   compareSemver,
   selectAssetForPlatform,
 } = require("../src/autoUpdater");
+const {
+  parseClaudeCredentialsJson,
+  parseClaudeUsageResponse,
+} = require("../src/providers/claudeCodeProvider");
+const {
+  parseCodexCredentialsJson,
+  parseCodexUsageResponse,
+} = require("../src/providers/codexProvider");
+const { mergeProviderResults } = require("../src/providers/providerManager");
 
 console.log("Running Cross-Platform Antigravity Usage Widget tests...");
 
@@ -220,5 +229,96 @@ assert.equal(
 assert.equal(selectAssetForPlatform(sampleAssets, "linux", { APPIMAGE: "/opt/OrbitHUD.AppImage" }).name, "OrbitHUD-Linux-x86_64.AppImage");
 assert.equal(selectAssetForPlatform(sampleAssets, "darwin", {}).name, "OrbitHUD-macOS.zip");
 console.log("  ✓ Auto-Updater semver & platform asset selection passed");
+
+// 5. Test Multi-Provider adapters (Claude Code & OpenAI Codex CLI) + ProviderManager merging
+const claudeCreds = parseClaudeCredentialsJson(
+  JSON.stringify({
+    claudeAiOauth: {
+      accessToken: "sk-ant-oat01-test-token",
+      expiresAt: 1799999999000,
+    },
+  })
+);
+assert.equal(claudeCreds.accessToken, "sk-ant-oat01-test-token");
+
+const claudeUsage = parseClaudeUsageResponse(
+  {
+    five_hour: { utilization: 33.0, resets_at: "2026-11-23T14:00:00Z" },
+    seven_day: { utilization: 13.0, resets_at: "2026-11-29T11:00:00Z" },
+    seven_day_sonnet: { utilization: 5.0, resets_at: "2026-11-29T11:00:00Z" },
+    seven_day_opus: null,
+  },
+  refNowMs
+);
+assert.ok(claudeUsage);
+assert.equal(claudeUsage.groups.length, 2);
+assert.equal(claudeUsage.groups[0].id, "claude-code::primary");
+assert.equal(claudeUsage.groups[0].providerId, "claude-code");
+assert.equal(claudeUsage.groups[0].buckets[0].remainingPercentage, 67);
+assert.equal(claudeUsage.groups[0].buckets[1].remainingPercentage, 87);
+assert.equal(claudeUsage.ringItems[0].title, "CC 5h");
+assert.equal(claudeUsage.ringItems[1].title, "CC Wk");
+
+const codexCreds = parseCodexCredentialsJson(
+  JSON.stringify({
+    tokens: { access_token: "codex-access-xyz", account_id: "acct_123" },
+  })
+);
+assert.equal(codexCreds.accessToken, "codex-access-xyz");
+assert.equal(codexCreds.accountId, "acct_123");
+
+const codexUsage = parseCodexUsageResponse(
+  {
+    plan_type: "Plus",
+    rate_limit: {
+      primary_window: {
+        used_percent: 25,
+        limit_window_seconds: 18000,
+        reset_after_seconds: 7200,
+      },
+      secondary_window: {
+        used_percent: 40,
+        limit_window_seconds: 604800,
+        reset_after_seconds: 259200,
+      },
+    },
+  },
+  refNowMs
+);
+assert.ok(codexUsage);
+assert.equal(codexUsage.groups.length, 1);
+assert.equal(codexUsage.groups[0].id, "codex::primary");
+assert.equal(codexUsage.groups[0].displayName, "Codex CLI (Plus)");
+assert.equal(codexUsage.groups[0].buckets[0].remainingPercentage, 75);
+assert.equal(codexUsage.groups[0].buckets[1].remainingPercentage, 60);
+assert.equal(codexUsage.ringItems[0].title, "CDX 5h");
+assert.equal(codexUsage.ringItems[1].title, "CDX Wk");
+
+const mergedMulti = mergeProviderResults(
+  {
+    antigravity: {
+      status: "connected",
+      groups: parsed.groups.map((g) => ({ ...g, providerId: "antigravity" })),
+      ringItems: parsed.ringItems.map((it) => ({ ...it, providerId: "antigravity" })),
+    },
+    "claude-code": {
+      status: "connected",
+      groups: claudeUsage.groups,
+      ringItems: claudeUsage.ringItems,
+    },
+    codex: {
+      status: "connected",
+      groups: codexUsage.groups,
+      ringItems: codexUsage.ringItems,
+    },
+  },
+  ["antigravity", "claude-code", "codex"],
+  refNowMs
+);
+assert.equal(mergedMulti.groups.length, 6);
+assert.equal(mergedMulti.providerStatuses.antigravity.status, "connected");
+assert.equal(mergedMulti.providerStatuses["claude-code"].shortName, "CC");
+assert.equal(mergedMulti.providerStatuses.codex.shortName, "CDX");
+console.log("  ✓ Multi-Provider adapters (Claude Code, Codex CLI) & ProviderManager passed");
 
 console.log("✅ All cross-platform tests passed!");

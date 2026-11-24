@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=OrbitHUD
+Comment=Zero-Gravity Glassmorphic Usage & Quota HUD for Google Antigravity, Claude Code, and Codex CLI
+Exec=/usr/bin/orbithud %U
+Icon=orbithud
+Terminal=false
+Type=Application
+Categories=Development;Utility;
+StartupWMClass=OrbitHUD

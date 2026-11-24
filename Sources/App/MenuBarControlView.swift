@@ -42,7 +42,33 @@ struct MenuBarControlView: View {
             }
 
             // Full Usage Bento Cards (Dynamic models)
+            if viewModel.enabledProviders.count > 1 {
+                ProviderFilterBarView(viewModel: viewModel)
+            }
             QuotaBentoContentListView(viewModel: viewModel, cardNamespace: "menubar")
+
+            Divider().overlay(Color.white.opacity(0.12))
+
+            // Multi-Provider Mode (Opt-in)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Providers")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.secondary)
+
+                HStack(spacing: 10) {
+                    ForEach(QuotaProviderID.allCases) { provider in
+                        Toggle(
+                            provider.shortTabName,
+                            isOn: Binding(
+                                get: { viewModel.enabledProviders.contains(provider) },
+                                set: { _ in viewModel.toggleProvider(provider) }
+                            )
+                        )
+                        .font(.system(size: 11, design: .rounded))
+                        .disabled(viewModel.enabledProviders.contains(provider) && viewModel.enabledProviders.count <= 1)
+                    }
+                }
+            }
 
             if !viewModel.snapshot.quotaGroups.isEmpty {
                 Divider().overlay(Color.white.opacity(0.12))
@@ -63,8 +89,11 @@ struct MenuBarControlView: View {
                     }
 
                     ForEach(viewModel.snapshot.quotaGroups) { group in
+                        let prefix = viewModel.enabledProviders.count > 1
+                            ? "[\(UsageWidgetLayout.shortBadge(for: group.providerId))] "
+                            : ""
                         Toggle(
-                            group.displayName,
+                            "\(prefix)\(group.displayName)",
                             isOn: Binding(
                                 get: { viewModel.isGroupVisible(group.id) },
                                 set: { _ in viewModel.toggleGroupVisibility(group.id) }

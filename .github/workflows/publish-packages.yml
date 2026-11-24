@@ -1,0 +1,140 @@
+name: Publish to Package Managers (Homebrew, WinGet, AUR)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag (e.g. v1.2.0)"
+        required: true
+
+jobs:
+  # 1. Update Homebrew Cask in mojtaba-afraz/homebrew-tap
+  publish-homebrew:
+    name: Update Homebrew Cask
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secret availability
+        id: check
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "Skipping Homebrew publish: HOMEBREW_TAP_GITHUB_TOKEN is not configured."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout OrbitHUD
+        if: steps.check.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+
+      - name: Update Homebrew Tap Cask
+        if: steps.check.outputs.enabled == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
+        run: |
+          VERSION="${RAW_TAG#v}"
+          DMG_URL="https://github.com/mojtaba-afraz/OrbitHUD/releases/download/v${VERSION}/OrbitHUD-macOS.dmg"
+          curl -fsSL "$DMG_URL" -o /tmp/OrbitHUD-macOS.dmg
+          SHA256=$(sha256sum /tmp/OrbitHUD-macOS.dmg | awk '{print $1}')
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/mojtaba-afraz/homebrew-tap.git" /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Casks
+          cp packaging/homebrew/orbithud.rb /tmp/homebrew-tap/Casks/orbithud.rb
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" /tmp/homebrew-tap/Casks/orbithud.rb
+          sed -i "s/sha256 .*/sha256 \"${SHA256}\"/" /tmp/homebrew-tap/Casks/orbithud.rb
+
+          cd /tmp/homebrew-tap
+          git config user.name "OrbitHUD Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add Casks/orbithud.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "orbithud: update to v${VERSION}"
+            git push origin HEAD
+          fi
+
+  # 2. Submit updated WinGet manifest to microsoft/winget-pkgs
+  publish-winget:
+    name: Update WinGet Manifest
+    runs-on: windows-latest
+    steps:
+      - name: Check secret availability
+        id: check
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_PAT }}
+        shell: bash
+        run: |
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "Skipping WinGet publish: WINGET_PAT is not configured."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run WinGet Releaser
+        if: steps.check.outputs.enabled == 'true'
+        uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: MojtabaAfraz.OrbitHUD
+          token: ${{ secrets.WINGET_PAT }}
+          installers-regex: 'OrbitHUD-Windows-Setup\.exe$'
+
+  # 3. Publish orbithud-bin to Arch User Repository (AUR)
+  publish-aur:
+    name: Update AUR (orbithud-bin)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secret availability
+        id: check
+        env:
+          AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$AUR_KEY" ]; then
+            echo "Skipping AUR publish: AUR_SSH_PRIVATE_KEY is not configured."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout OrbitHUD
+        if: steps.check.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+
+      - name: Update PKGBUILD version & checksums
+        if: steps.check.outputs.enabled == 'true'
+        env:
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
+        run: |
+          VERSION="${RAW_TAG#v}"
+          APPIMAGE_URL="https://github.com/mojtaba-afraz/OrbitHUD/releases/download/v${VERSION}/OrbitHUD-Linux-x86_64.AppImage"
+          curl -fsSL "$APPIMAGE_URL" -o /tmp/OrbitHUD.AppImage
+          APPIMAGE_SHA=$(sha256sum /tmp/OrbitHUD.AppImage | awk '{print $1}')
+          DESKTOP_SHA=$(sha256sum packaging/aur/orbithud.desktop | awk '{print $1}')
+          ICON_SHA=$(sha256sum assets/logo.png | awk '{print $1}')
+
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" packaging/aur/PKGBUILD
+          python3 -c "
+          p = 'packaging/aur/PKGBUILD'
+          s = open(p).read()
+          old = \"sha256sums_x86_64=(\n  'SKIP'\n  'SKIP'\n  'SKIP'\n)\"
+          new = \"sha256sums_x86_64=(\n  '${APPIMAGE_SHA}'\n  '${DESKTOP_SHA}'\n  '${ICON_SHA}'\n)\"
+          open(p, 'w').write(s.replace(old, new))
+          "
+
+      - name: Publish to AUR
+        if: steps.check.outputs.enabled == 'true'
+        uses: KSXGitHub/github-actions-deploy-aur@v3
+        with:
+          pkgname: orbithud-bin
+          asset_dir: packaging/aur
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_username: "OrbitHUD Release Bot"
+          commit_email: "actions@users.noreply.github.com"
+          commit_message: "Update orbithud-bin to v${{ github.event.release.tag_name || inputs.tag_name }}"
+          updpkgsums: false
+          test: true

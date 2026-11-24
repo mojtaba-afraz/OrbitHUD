@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld("antigravityWidget", {
   },
   toggleMode: () => ipcRenderer.invoke("widget:toggle-mode"),
   toggleCompact: () => ipcRenderer.invoke("widget:toggle-compact"),
+  toggleProvider: (providerId) =>
+    ipcRenderer.invoke("widget:toggle-provider", providerId),
+  setProviderFilter: (filterId) =>
+    ipcRenderer.invoke("widget:set-provider-filter", filterId),
   toggleGroupVisibility: (groupId) =>
     ipcRenderer.invoke("widget:toggle-group-visibility", groupId),
   showAllGroups: () => ipcRenderer.invoke("widget:show-all-groups"),

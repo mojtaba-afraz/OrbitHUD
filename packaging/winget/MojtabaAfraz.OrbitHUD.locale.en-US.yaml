@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: MojtabaAfraz.OrbitHUD
+PackageVersion: 1.2.0
+PackageLocale: en-US
+Publisher: Mojtaba Afraz
+PublisherUrl: https://github.com/mojtaba-afraz
+PublisherSupportUrl: https://github.com/mojtaba-afraz/OrbitHUD/issues
+Author: Mojtaba Afraz
+PackageName: OrbitHUD
+PackageUrl: https://github.com/mojtaba-afraz/OrbitHUD
+License: MIT
+LicenseUrl: https://github.com/mojtaba-afraz/OrbitHUD/blob/main/LICENSE
+ShortDescription: Zero-Gravity Glassmorphic Usage & Quota HUD for Google Antigravity, Claude Code, and Codex CLI.
+Description: OrbitHUD is a lightweight, real-time glassmorphic desktop and floating HUD widget that monitors live usage quotas for Google Antigravity, with optional multi-provider support for Claude Code and OpenAI Codex CLI.
+Tags:
+  - antigravity
+  - claude-code
+  - codex
+  - ai
+  - quota
+  - hud
+  - widget
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

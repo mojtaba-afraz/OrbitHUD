@@ -1,7 +1,7 @@
 {
   "name": "orbithud",
-  "version": "1.1.0",
-  "description": "OrbitHUD — Zero-Gravity Glassmorphic Desktop & Floating Usage Widget for Google Antigravity (Windows, Linux, macOS)",
+  "version": "1.2.0",
+  "description": "OrbitHUD — Zero-Gravity Glassmorphic AI Usage & Quota HUD for Google Antigravity, Claude Code, and OpenAI Codex CLI (macOS, Windows, Linux)",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -13,8 +13,13 @@
   },
   "keywords": [
     "antigravity",
+    "claude-code",
+    "codex",
+    "multi-provider",
+    "ai-coding",
     "usage",
     "quota",
+    "hud",
     "widget",
     "windows",
     "linux",

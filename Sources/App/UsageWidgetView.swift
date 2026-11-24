@@ -157,14 +157,29 @@ struct GlassProgressBar: View {
     }
 }
 
-/// Shared dynamic layout dimensions for both UsageWidgetView and WidgetWindowManager.
+/// Shared dynamic layout dimensions and provider colors for UsageWidgetView and WidgetWindowManager.
 enum UsageWidgetLayout {
+    static func accentColor(for providerId: String) -> Color {
+        switch providerId {
+        case QuotaProviderID.claudeCode.rawValue:
+            return Color(red: 0.91, green: 0.57, blue: 0.42)
+        case QuotaProviderID.codex.rawValue:
+            return Color(red: 0.22, green: 0.74, blue: 0.97)
+        default:
+            return Color(red: 0.24, green: 0.86, blue: 0.58)
+        }
+    }
+
+    static func shortBadge(for providerId: String) -> String {
+        QuotaProviderID(rawValue: providerId)?.shortBadge ?? String(providerId.prefix(3)).uppercased()
+    }
+
     @MainActor
     static func targetSize(for viewModel: UsageViewModel) -> CGSize {
         if viewModel.isCompactMode {
             let visibleItems = viewModel.snapshot
                 .iosRingItems(relativeTo: viewModel.snapshot.timestamp)
-                .filter { viewModel.isGroupVisible($0.groupId) }
+                .filter { viewModel.isRingItemVisible($0) }
             let width: CGFloat
             switch visibleItems.count {
             case 0: width = 264
@@ -176,19 +191,85 @@ enum UsageWidgetLayout {
             return CGSize(width: width, height: 52)
         }
 
-        let allGroups = viewModel.snapshot.quotaGroups
+        let tabsExtra: CGFloat = viewModel.enabledProviders.count > 1 ? 32 : 0
         let visibleGroups = viewModel.visibleQuotaGroups
-        if allGroups.isEmpty || visibleGroups.isEmpty {
-            return CGSize(width: 356, height: 112)
+        let statusCards = viewModel.visibleStatusCards
+
+        if visibleGroups.isEmpty && statusCards.isEmpty {
+            return CGSize(width: 356, height: 112 + tabsExtra)
         }
 
         // Outer vertical padding (26) + header (22) + spacing (9)
-        var height: CGFloat = 57
+        var height: CGFloat = 57 + tabsExtra
         for (idx, group) in visibleGroups.enumerated() {
             height += group.buckets.count >= 2 ? 78 : 70
             if idx > 0 { height += 9 }
         }
+        for idx in 0..<statusCards.count {
+            if !visibleGroups.isEmpty || idx > 0 { height += 9 }
+            height += 40
+        }
         return CGSize(width: 356, height: min(max(height, 112), 620))
+    }
+}
+
+/// Segmented glass filter bar shown when 2+ providers are enabled.
+struct ProviderFilterBarView: View {
+    @ObservedObject var viewModel: UsageViewModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            filterTab(id: "all", title: "All", dotColor: nil)
+            ForEach(viewModel.orderedEnabledProviders) { provider in
+                let st = viewModel.providerStatuses[provider]?.state
+                let dotColor: Color = {
+                    if st == .authRequired || st == .rateLimited {
+                        return Color(red: 0.98, green: 0.72, blue: 0.22)
+                    } else if st == .disconnected {
+                        return Color.white.opacity(0.32)
+                    }
+                    return UsageWidgetLayout.accentColor(for: provider.rawValue)
+                }()
+                filterTab(id: provider.rawValue, title: provider.shortTabName, dotColor: dotColor)
+            }
+        }
+        .padding(2.5)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
+                )
+        )
+    }
+
+    private func filterTab(id: String, title: String, dotColor: Color?) -> some View {
+        let isActive = viewModel.activeProviderFilter == id
+        return Button {
+            withAnimation(.easeOut(duration: 0.14)) {
+                viewModel.setProviderFilter(id)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if let dotColor {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 5, height: 5)
+                }
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(isActive ? .white : Color.white.opacity(0.70))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 20)
+            .background(
+                Capsule()
+                    .fill(isActive ? Color.white.opacity(0.16) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -197,15 +278,20 @@ struct QuotaBentoContentListView: View {
     @ObservedObject var viewModel: UsageViewModel
     let cardNamespace: String
 
+    private var showProviderBadge: Bool {
+        viewModel.enabledProviders.count > 1 && viewModel.activeProviderFilter == "all"
+    }
+
     var body: some View {
         let now = viewModel.snapshot.timestamp
         let allGroups = viewModel.snapshot.quotaGroups
         let visibleGroups = viewModel.visibleQuotaGroups
+        let statusCards = viewModel.visibleStatusCards
 
         VStack(alignment: .leading, spacing: 9) {
-            if allGroups.isEmpty {
+            if allGroups.isEmpty && statusCards.isEmpty {
                 emptyStateBento
-            } else if visibleGroups.isEmpty {
+            } else if visibleGroups.isEmpty && statusCards.isEmpty && !allGroups.isEmpty {
                 allHiddenStateBento
             } else {
                 ForEach(visibleGroups) { group in
@@ -223,6 +309,60 @@ struct QuotaBentoContentListView: View {
                         )
                     }
                 }
+
+                ForEach(statusCards, id: \.providerId) { status in
+                    providerStatusBentoCard(status: status)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func providerMicroBadge(_ providerId: String) -> some View {
+        if showProviderBadge {
+            let accent = UsageWidgetLayout.accentColor(for: providerId)
+            Text(UsageWidgetLayout.shortBadge(for: providerId))
+                .font(.system(size: 8.5, weight: .bold, design: .rounded))
+                .foregroundColor(accent)
+                .padding(.horizontal, 4.5)
+                .padding(.vertical, 1)
+                .background(
+                    Capsule()
+                        .fill(accent.opacity(0.14))
+                        .overlay(Capsule().strokeBorder(accent.opacity(0.32), lineWidth: 0.6))
+                )
+        }
+    }
+
+    private func providerStatusBentoCard(status: ProviderStatusInfo) -> some View {
+        let accent = UsageWidgetLayout.accentColor(for: status.providerId.rawValue)
+        let dotColor: Color = (status.state == .authRequired || status.state == .rateLimited)
+            ? Color(red: 0.98, green: 0.72, blue: 0.22)
+            : Color.white.opacity(0.35)
+
+        return GlassBentoCard(cardId: "\(cardNamespace)-status-\(status.providerId.rawValue)", viewModel: viewModel, cornerRadius: 14, padding: 9) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 5.5, height: 5.5)
+
+                Text(status.providerId.shortBadge)
+                    .font(.system(size: 8.5, weight: .bold, design: .rounded))
+                    .foregroundColor(accent)
+                    .padding(.horizontal, 4.5)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule()
+                            .fill(accent.opacity(0.14))
+                            .overlay(Capsule().strokeBorder(accent.opacity(0.32), lineWidth: 0.6))
+                    )
+
+                Text(status.message ?? "\(status.providerId.displayName) unavailable")
+                    .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                    .foregroundColor(Color.white.opacity(0.76))
+                    .lineLimit(1)
+
+                Spacer()
             }
         }
     }
@@ -256,7 +396,9 @@ struct QuotaBentoContentListView: View {
 
                 VStack(alignment: .leading, spacing: 5) {
                     // Header + primary limit row
-                    HStack(alignment: .firstTextBaseline) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        providerMicroBadge(group.providerId)
+
                         Text(group.displayName)
                             .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                             .foregroundColor(.white)
@@ -344,10 +486,13 @@ struct QuotaBentoContentListView: View {
                 )
 
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        providerMicroBadge(group.providerId)
+
                         Text(group.displayName)
                             .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                             .foregroundColor(.white)
+                            .lineLimit(1)
 
                         Spacer()
 
@@ -439,6 +584,9 @@ struct UsageWidgetView: View {
             } else {
                 VStack(alignment: .leading, spacing: 9) {
                     headerBar
+                    if viewModel.enabledProviders.count > 1 {
+                        ProviderFilterBarView(viewModel: viewModel)
+                    }
                     QuotaBentoContentListView(viewModel: viewModel, cardNamespace: windowRole.rawValue)
                 }
                 .padding(13)
@@ -529,7 +677,8 @@ struct UsageWidgetView: View {
     private var compactGlassPillView: some View {
         let items = viewModel.snapshot
             .iosRingItems(relativeTo: viewModel.snapshot.timestamp)
-            .filter { viewModel.isGroupVisible($0.groupId) }
+            .filter { viewModel.isRingItemVisible($0) }
+        let multiProvider = viewModel.enabledProviders.count > 1
 
         return HStack(spacing: 6) {
             if items.isEmpty && !viewModel.snapshot.quotaGroups.isEmpty {
@@ -556,10 +705,17 @@ struct UsageWidgetView: View {
                                 .monospacedDigit()
                                 .foregroundColor(.white)
 
-                            Text(shortPillLabel(item.title))
-                                .font(.system(size: 8.5, weight: .medium, design: .rounded))
-                                .foregroundColor(Color.white.opacity(0.55))
-                                .lineLimit(1)
+                            HStack(spacing: 3) {
+                                if multiProvider {
+                                    Circle()
+                                        .fill(UsageWidgetLayout.accentColor(for: item.providerId))
+                                        .frame(width: 4, height: 4)
+                                }
+                                Text(shortPillLabel(item.title))
+                                    .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                                    .foregroundColor(Color.white.opacity(0.55))
+                                    .lineLimit(1)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

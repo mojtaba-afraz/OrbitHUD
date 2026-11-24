@@ -7,10 +7,16 @@ const layoutBtn = document.getElementById("layout-btn");
 const refreshBtn = document.getElementById("refresh-btn");
 const menuBtn = document.getElementById("menu-btn");
 const quitBtn = document.getElementById("quit-btn");
+const providerTabsEl = document.getElementById("provider-tabs");
 const updateBanner = document.getElementById("update-banner");
 const bentoContainer = document.getElementById("bento-container");
 const widgetCard = document.getElementById("widget-card");
 let latestUpdateState = null;
+let latestProviderMeta = {
+  antigravity: { id: "antigravity", name: "Antigravity", shortName: "AGY", accentColor: "#3DDB94" },
+  "claude-code": { id: "claude-code", name: "Claude Code", shortName: "CC", accentColor: "#E8926B" },
+  codex: { id: "codex", name: "Codex CLI", shortName: "CDX", accentColor: "#38BDF8" },
+};
 
 function semanticColor(fraction) {
   if (fraction <= 0.15) return "#FF5252";
@@ -78,7 +84,62 @@ function formatShortPillName(title) {
   return cleaned.length > 10 ? `${cleaned.slice(0, 9)}…` : cleaned;
 }
 
-function renderDualWindowBentoCard(group) {
+function renderProviderBadge(providerId, showBadge) {
+  if (!showBadge) return "";
+  const pid = providerId || "antigravity";
+  const meta = latestProviderMeta[pid] || { shortName: pid.slice(0, 3).toUpperCase(), accentColor: "#94A3B8" };
+  return `<span class="provider-badge" style="color:${meta.accentColor};border-color:${meta.accentColor}44;background:${meta.accentColor}1a">${meta.shortName}</span>`;
+}
+
+function renderProviderTabs(enabledProviders, activeFilter, providerStatuses, isCompact) {
+  if (!providerTabsEl) return;
+  if (isCompact || !Array.isArray(enabledProviders) || enabledProviders.length <= 1) {
+    providerTabsEl.classList.add("hidden");
+    providerTabsEl.innerHTML = "";
+    return;
+  }
+
+  providerTabsEl.classList.remove("hidden");
+  const tabs = [
+    { id: "all", label: "All", dotColor: null },
+    ...enabledProviders.map((id) => {
+      const meta = latestProviderMeta[id] || { name: id, accentColor: "#94A3B8" };
+      const st = providerStatuses?.[id]?.status;
+      const dotColor =
+        st === "auth_required" || st === "rate_limited"
+          ? "#FAB838"
+          : st === "disconnected"
+          ? "rgba(255,255,255,0.3)"
+          : meta.accentColor;
+      const shortTab =
+        id === "claude-code" ? "Claude" : id === "codex" ? "Codex" : meta.name;
+      return { id, label: shortTab, dotColor };
+    }),
+  ];
+
+  providerTabsEl.innerHTML = tabs
+    .map(
+      (t) => `
+      <button class="provider-tab ${activeFilter === t.id ? "active" : ""}" data-provider-filter="${t.id}">
+        ${t.dotColor ? `<span class="provider-dot" style="background:${t.dotColor}"></span>` : ""}
+        <span>${t.label}</span>
+      </button>
+    `
+    )
+    .join("");
+
+  providerTabsEl.querySelectorAll(".provider-tab").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const target = btn.getAttribute("data-provider-filter");
+      if (target && window.antigravityWidget.setProviderFilter) {
+        window.antigravityWidget.setProviderFilter(target);
+      }
+    });
+  });
+}
+
+function renderDualWindowBentoCard(group, showProviderBadge = false) {
   if (!group || !group.buckets || group.buckets.length === 0) return "";
   const primary =
     group.buckets.find((b) => (b.window || "").toLowerCase() === "5h") ||
@@ -103,7 +164,10 @@ function renderDualWindowBentoCard(group) {
       ${renderCircularGauge(primary.remainingFraction, 46, 4.5, true)}
       <div class="hero-details">
         <div class="hero-top-row">
-          <span class="hero-title" title="${group.displayName}">${group.displayName}</span>
+          <div class="hero-title-wrap">
+            ${renderProviderBadge(group.providerId, showProviderBadge)}
+            <span class="hero-title" title="${group.displayName}">${group.displayName}</span>
+          </div>
           <span class="hero-meta" style="color:${primaryColor};font-weight:600">${primaryMeta}</span>
         </div>
         ${
@@ -133,7 +197,7 @@ function renderDualWindowBentoCard(group) {
   `;
 }
 
-function renderSingleWindowBentoCard(group) {
+function renderSingleWindowBentoCard(group, showProviderBadge = false) {
   if (!group || !group.buckets || group.buckets.length === 0) return "";
   const b = group.buckets[0];
   const color = semanticColor(b.remainingFraction);
@@ -148,7 +212,10 @@ function renderSingleWindowBentoCard(group) {
       ${renderCircularGauge(b.remainingFraction, 42, 4.2, true)}
       <div class="hero-details">
         <div class="hero-top-row">
-          <span class="hero-title" title="${group.displayName}">${group.displayName}</span>
+          <div class="hero-title-wrap">
+            ${renderProviderBadge(group.providerId, showProviderBadge)}
+            <span class="hero-title" title="${group.displayName}">${group.displayName}</span>
+          </div>
           <span class="tile-pct" style="color:${color}">${b.remainingPercentage}% left</span>
         </div>
         <div class="glass-bar-track">
@@ -158,6 +225,21 @@ function renderSingleWindowBentoCard(group) {
           )}%;background:${color}"></div>
         </div>
         <div class="tile-sub" style="margin-top:2px">${sub}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderProviderStatusCard(statusObj) {
+  const accent = statusObj.accentColor || "#FAB838";
+  const isWarn = statusObj.status === "auth_required" || statusObj.status === "rate_limited";
+  const dotColor = isWarn ? "#FAB838" : "rgba(255,255,255,0.35)";
+  return `
+    <div class="bento-card provider-status-card">
+      <div class="provider-status-left">
+        <span class="provider-dot" style="background:${dotColor}"></span>
+        <span class="provider-badge" style="color:${accent};border-color:${accent}44;background:${accent}1a">${statusObj.shortName}</span>
+        <span class="provider-status-msg">${statusObj.message || `${statusObj.name} disconnected`}</span>
       </div>
     </div>
   `;
@@ -291,22 +373,56 @@ function bindCompactButtons() {
   }
 }
 
-function renderWidget(quotaData, isCompact, hiddenGroupIds = []) {
+function renderWidget(
+  quotaData,
+  isCompact,
+  hiddenGroupIds = [],
+  enabledProviders = ["antigravity"],
+  activeProviderFilter = "all"
+) {
   widgetCard.classList.toggle("compact-mode", Boolean(isCompact));
 
-  const groups = quotaData?.groups || [];
-  const ringItems = quotaData?.ringItems || [];
-  const hiddenSet = new Set(Array.isArray(hiddenGroupIds) ? hiddenGroupIds : []);
-  const visibleGroups = groups.filter((g) => !hiddenSet.has(g.id));
-  const visibleRingItems = ringItems.filter(
-    (item) => !item.groupId || !hiddenSet.has(item.groupId)
+  const providerStatuses = quotaData?.providerStatuses || {};
+  renderProviderTabs(enabledProviders, activeProviderFilter, providerStatuses, isCompact);
+
+  const multiProvider = Array.isArray(enabledProviders) && enabledProviders.length > 1;
+  const showProviderBadges = multiProvider && activeProviderFilter === "all";
+
+  const enabledSet = new Set(enabledProviders);
+  const allEnabledGroups = (quotaData?.groups || []).filter((g) =>
+    enabledSet.has(g.providerId || "antigravity")
+  );
+  const filteredByProviderGroups = allEnabledGroups.filter(
+    (g) => activeProviderFilter === "all" || (g.providerId || "antigravity") === activeProviderFilter
   );
 
-  if (groups.length === 0) {
+  const hiddenSet = new Set(Array.isArray(hiddenGroupIds) ? hiddenGroupIds : []);
+  const visibleGroups = filteredByProviderGroups.filter((g) => !hiddenSet.has(g.id));
+
+  const ringItems = (quotaData?.ringItems || []).filter((item) => {
+    const pid = item.providerId || "antigravity";
+    if (!enabledSet.has(pid)) return false;
+    if (activeProviderFilter !== "all" && pid !== activeProviderFilter) return false;
+    return !item.groupId || !hiddenSet.has(item.groupId);
+  });
+
+  // Collect status cards for enabled providers that have no live cards shown
+  const statusCards = enabledProviders
+    .filter((pid) => activeProviderFilter === "all" || pid === activeProviderFilter)
+    .map((pid) => providerStatuses[pid])
+    .filter((st) => {
+      if (!st) return false;
+      if (st.status === "connected") return false;
+      const hasCards = visibleGroups.some((g) => (g.providerId || "antigravity") === st.id);
+      if (hasCards && st.status !== "rate_limited") return false;
+      return st.status === "auth_required" || st.status === "rate_limited" || activeProviderFilter === st.id;
+    });
+
+  if (allEnabledGroups.length === 0 && statusCards.length === 0) {
     if (isCompact) {
       bentoContainer.innerHTML = `
         <div class="pill-row">
-          <span class="empty-pill-text">Waiting for Antigravity...</span>
+          <span class="empty-pill-text">Waiting for live quota...</span>
           <div class="pill-actions">
             <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
             <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
@@ -318,14 +434,14 @@ function renderWidget(quotaData, isCompact, hiddenGroupIds = []) {
     }
     bentoContainer.innerHTML = `
       <div class="bento-card empty-card">
-        <span>Waiting for Antigravity live quota...</span>
+        <span>Waiting for live quota...</span>
       </div>
     `;
     syncBentoHeightIfNeeded(isCompact);
     return;
   }
 
-  if (visibleGroups.length === 0) {
+  if (filteredByProviderGroups.length > 0 && visibleGroups.length === 0) {
     if (isCompact) {
       bentoContainer.innerHTML = `
         <div class="pill-row">
@@ -358,18 +474,38 @@ function renderWidget(quotaData, isCompact, hiddenGroupIds = []) {
   }
 
   if (isCompact) {
+    if (ringItems.length === 0 && statusCards.length > 0) {
+      bentoContainer.innerHTML = `
+        <div class="pill-row">
+          <span class="empty-pill-text">${statusCards[0].shortName}: ${statusCards[0].message || "Login needed"}</span>
+          <div class="pill-actions">
+            <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
+            <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
+          </div>
+        </div>
+      `;
+      bindCompactButtons();
+      return;
+    }
+
     bentoContainer.innerHTML = `
       <div class="pill-row">
-        ${visibleRingItems
+        ${ringItems
           .slice(0, 6)
           .map((item) => {
             const shortName = formatShortPillName(item.title);
+            const pid = item.providerId || "antigravity";
+            const accent = latestProviderMeta[pid]?.accentColor || "#3DDB94";
             return `
               <div class="pill-item" title="${item.title}: ${item.remainingPercentage}% (${item.subtitle || ""})">
                 ${renderCircularGauge(item.remainingFraction, 24, 2.8, false)}
                 <div class="pill-text">
                   <div class="pill-pct">${item.remainingPercentage}%</div>
-                  <div class="pill-name">${shortName}</div>
+                  <div class="pill-name">${
+                    multiProvider
+                      ? `<span class="pill-provider-dot" style="background:${accent}"></span>`
+                      : ""
+                  }${shortName}</div>
                 </div>
               </div>
             `;
@@ -392,13 +528,16 @@ function renderWidget(quotaData, isCompact, hiddenGroupIds = []) {
     return;
   }
 
-  bentoContainer.innerHTML = visibleGroups
+  const groupCardsHtml = visibleGroups
     .map((group) =>
       Array.isArray(group.buckets) && group.buckets.length >= 2
-        ? renderDualWindowBentoCard(group)
-        : renderSingleWindowBentoCard(group)
+        ? renderDualWindowBentoCard(group, showProviderBadges)
+        : renderSingleWindowBentoCard(group, showProviderBadges)
     )
     .join("");
+  const statusCardsHtml = statusCards.map(renderProviderStatusCard).join("");
+
+  bentoContainer.innerHTML = `${groupCardsHtml}${statusCardsHtml}`;
   syncBentoHeightIfNeeded(isCompact);
 }
 
@@ -408,8 +547,17 @@ window.antigravityWidget.onStateUpdate((state) => {
   modeBtnText.textContent = isFloating ? "Pin Desktop" : "Float Top";
   widgetCard.classList.toggle("locked", Boolean(state.locked));
   latestUpdateState = state.update || null;
+  if (state.providerMeta) {
+    latestProviderMeta = state.providerMeta;
+  }
   renderUpdateBanner(latestUpdateState);
-  renderWidget(state.quotaData, state.compact, state.hiddenGroupIds || []);
+  renderWidget(
+    state.quotaData,
+    state.compact,
+    state.hiddenGroupIds || [],
+    state.enabledProviders || ["antigravity"],
+    state.activeProviderFilter || "all"
+  );
 });
 
 modeBtn.addEventListener("click", (e) => {

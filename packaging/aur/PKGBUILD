@@ -1,0 +1,28 @@
+# Maintainer: Mojtaba Afraz <mojtaba.afraz@users.noreply.github.com>
+pkgname=orbithud-bin
+pkgver=1.2.0
+pkgrel=1
+pkgdesc="Zero-Gravity Glassmorphic Usage & Quota HUD for Google Antigravity, Claude Code, and Codex CLI"
+arch=('x86_64')
+url="https://github.com/mojtaba-afraz/OrbitHUD"
+license=('MIT')
+depends=('fuse2' 'gtk3' 'libnotify' 'nss' 'libxss' 'libxtst' 'xdg-utils' 'at-spi2-core' 'util-linux-libs')
+provides=('orbithud')
+conflicts=('orbithud')
+options=('!strip')
+source_x86_64=(
+  "orbithud-${pkgver}.AppImage::https://github.com/mojtaba-afraz/OrbitHUD/releases/download/v${pkgver}/OrbitHUD-Linux-x86_64.AppImage"
+  "orbithud.desktop"
+  "orbithud.png::https://raw.githubusercontent.com/mojtaba-afraz/OrbitHUD/v${pkgver}/assets/logo.png"
+)
+sha256sums_x86_64=(
+  'SKIP'
+  'SKIP'
+  'SKIP'
+)
+
+package() {
+  install -Dm755 "${srcdir}/orbithud-${pkgver}.AppImage" "${pkgdir}/usr/bin/orbithud"
+  install -Dm644 "${srcdir}/orbithud.desktop" "${pkgdir}/usr/share/applications/orbithud.desktop"
+  install -Dm644 "${srcdir}/orbithud.png" "${pkgdir}/usr/share/icons/hicolor/256x256/apps/orbithud.png"
+}
