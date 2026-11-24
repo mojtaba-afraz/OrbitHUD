@@ -82,13 +82,20 @@ function hasVisibleUpdateBanner() {
   );
 }
 
+// 12px transparent halo around the rounded card so CSS drop-shadow never clips at window edges
+const WINDOW_SHADOW_PAD = 12;
+
 function getTargetDimensions() {
   if (state.compact) {
-    return { width: 356, height: 68 };
+    return {
+      width: 368 + WINDOW_SHADOW_PAD * 2,
+      height: 68 + WINDOW_SHADOW_PAD * 2,
+    };
   }
+  const cardHeight = hasVisibleUpdateBanner() ? 316 : 280;
   return {
-    width: 356,
-    height: hasVisibleUpdateBanner() ? 316 : 280,
+    width: 356 + WINDOW_SHADOW_PAD * 2,
+    height: cardHeight + WINDOW_SHADOW_PAD * 2,
   };
 }
 
@@ -133,7 +140,7 @@ function createWidgetWindow() {
     minimizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    hasShadow: true,
+    hasShadow: false,
     icon: getAppIconImage(),
     backgroundColor: "#00000000",
     ...(process.platform === "darwin"

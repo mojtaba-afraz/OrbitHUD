@@ -34,7 +34,7 @@ function renderCircularGauge(fraction, size = 46, strokeWidth = 4.5, showText = 
           cy="${size / 2}"
           r="${radius}"
           fill="none"
-          stroke="rgba(255,255,255,0.12)"
+          stroke="rgba(255,255,255,0.18)"
           stroke-width="${strokeWidth}"
         />
         <circle
