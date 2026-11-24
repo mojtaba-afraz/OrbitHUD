@@ -549,6 +549,23 @@ function formatResetDuration(resetTimeISO, nowMs = Date.now()) {
   return `${Math.max(minutes, 1)}m`;
 }
 
+function formatWindowLabel(window, fallbackDisplayName = "") {
+  const lower = (window || "").toLowerCase();
+  if (lower === "weekly") return "Weekly limit";
+  if (lower === "5h" || lower === "5hr" || lower === "five_hour") return "5h limit";
+  if (lower === "daily") return "Daily limit";
+  if (lower) return `${window} limit`;
+  return fallbackDisplayName || "Limit";
+}
+
+function shortWindowTag(window) {
+  const lower = (window || "").toLowerCase();
+  if (lower === "5h" || lower === "5hr" || lower === "five_hour") return "5h";
+  if (lower === "weekly") return "Wk";
+  if (lower === "daily") return "1d";
+  return window || "";
+}
+
 function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
   const root = typeof rawJson === "string" ? JSON.parse(rawJson) : rawJson;
   if (!root || typeof root !== "object") return null;
@@ -580,11 +597,13 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
       const remainingPercentage = Math.round(remainingFraction * 100);
       const resetTime = b.resetTime || b.reset_time || null;
       const resetDuration = formatResetDuration(resetTime, nowMs);
+      const bucketDisplayName = b.displayName || b.display_name || id;
 
       buckets.push({
         id,
-        displayName: b.displayName || b.display_name || id,
+        displayName: bucketDisplayName,
         window,
+        windowLabel: formatWindowLabel(window, bucketDisplayName),
         remainingFraction,
         remainingPercentage,
         resetTime,
@@ -607,7 +626,7 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
   const ringItems = [];
   for (const group of groups) {
     const lower = group.displayName.toLowerCase();
-    if (lower.includes("gemini models") || (lower.includes("gemini") && !lower.includes("argon"))) {
+    if (lower.includes("gemini models") || (lower.includes("gemini") && !lower.includes("argon") && group.buckets.some((b) => b.window === "5h"))) {
       const sorted = [...group.buckets].sort((a, b) => (a.window === "5h" ? -1 : b.window === "5h" ? 1 : 0));
       for (const bucket of sorted) {
         const is5h = bucket.window === "5h";
@@ -620,6 +639,7 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
             : "Weekly";
         ringItems.push({
           id: bucket.id,
+          groupId: group.id,
           title,
           subtitle,
           remainingFraction: bucket.remainingFraction,
@@ -635,6 +655,7 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
           : "Weekly";
       ringItems.push({
         id: bucket.id,
+        groupId: group.id,
         title: "Argon 4",
         subtitle,
         remainingFraction: bucket.remainingFraction,
@@ -652,6 +673,7 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
             : "Full";
         ringItems.push({
           id: bucket.id,
+          groupId: group.id,
           title,
           subtitle,
           remainingFraction: bucket.remainingFraction,
@@ -660,11 +682,20 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
         });
       }
     } else {
-      for (const bucket of group.buckets) {
+      const sorted = [...group.buckets].sort((a, b) => (a.window === "5h" ? -1 : b.window === "5h" ? 1 : 0));
+      for (const bucket of sorted) {
+        const tag = shortWindowTag(bucket.window);
+        const title =
+          sorted.length > 1 && tag ? `${group.displayName} ${tag}` : group.displayName;
+        const subtitle =
+          bucket.remainingPercentage < 100 && bucket.resetDuration
+            ? `↻ ${bucket.resetDuration}`
+            : bucket.windowLabel || bucket.window;
         ringItems.push({
           id: bucket.id,
-          title: group.displayName,
-          subtitle: bucket.resetDuration ? `↻ ${bucket.resetDuration}` : bucket.window,
+          groupId: group.id,
+          title,
+          subtitle,
           remainingFraction: bucket.remainingFraction,
           remainingPercentage: bucket.remainingPercentage,
           category: "other",
@@ -775,6 +806,7 @@ module.exports = {
   discoverFromDaemonFiles,
   parseConnectionsFromText,
   formatResetDuration,
+  formatWindowLabel,
   parseQuotaSummaryResponse,
   discoverConnections,
   fetchLiveQuotaSummary,

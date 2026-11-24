@@ -157,6 +157,41 @@ struct GlassProgressBar: View {
     }
 }
 
+/// Shared dynamic layout dimensions for both UsageWidgetView and WidgetWindowManager.
+enum UsageWidgetLayout {
+    @MainActor
+    static func targetSize(for viewModel: UsageViewModel) -> CGSize {
+        if viewModel.isCompactMode {
+            let visibleItems = viewModel.snapshot
+                .iosRingItems(relativeTo: viewModel.snapshot.timestamp)
+                .filter { viewModel.isGroupVisible($0.groupId) }
+            let width: CGFloat
+            switch visibleItems.count {
+            case 0: width = 264
+            case 1...2: width = 252
+            case 3: width = 308
+            case 4...5: width = 356
+            default: width = 416
+            }
+            return CGSize(width: width, height: 52)
+        }
+
+        let allGroups = viewModel.snapshot.quotaGroups
+        let visibleGroups = viewModel.visibleQuotaGroups
+        if allGroups.isEmpty || visibleGroups.isEmpty {
+            return CGSize(width: 356, height: 112)
+        }
+
+        // Outer vertical padding (26) + header (22) + spacing (9)
+        var height: CGFloat = 57
+        for (idx, group) in visibleGroups.enumerated() {
+            height += group.buckets.count >= 2 ? 78 : 70
+            if idx > 0 { height += 9 }
+        }
+        return CGSize(width: 356, height: min(max(height, 112), 620))
+    }
+}
+
 /// Shared Glassmorphic Bento Cards View used inside BOTH the Desktop/Floating Widget AND the Menu Bar Popover.
 struct QuotaBentoContentListView: View {
     @ObservedObject var viewModel: UsageViewModel
@@ -164,56 +199,53 @@ struct QuotaBentoContentListView: View {
 
     var body: some View {
         let now = viewModel.snapshot.timestamp
-        let groups = viewModel.snapshot.quotaGroups
+        let allGroups = viewModel.snapshot.quotaGroups
+        let visibleGroups = viewModel.visibleQuotaGroups
 
         VStack(alignment: .leading, spacing: 9) {
-            if groups.isEmpty {
+            if allGroups.isEmpty {
                 emptyStateBento
+            } else if visibleGroups.isEmpty {
+                allHiddenStateBento
             } else {
-                // 1. Gemini Models Card (5h limit + Weekly limit)
-                if let geminiGroup = groups.first(where: {
-                    let l = $0.displayName.lowercased()
-                    return l.contains("gemini") && !l.contains("argon")
-                }) ?? groups.first {
-                    dualWindowBentoCard(
-                        cardId: "\(cardNamespace)-gemini",
-                        group: geminiGroup,
-                        now: now
-                    )
-                }
-
-                // 2. Claude and GPT Models Card (5h limit + Weekly limit)
-                if let claudeGroup = groups.first(where: {
-                    let l = $0.displayName.lowercased()
-                    return l.contains("claude") || l.contains("gpt")
-                }) {
-                    dualWindowBentoCard(
-                        cardId: "\(cardNamespace)-claude",
-                        group: claudeGroup,
-                        now: now
-                    )
-                }
-
-                // 3. Gemini 4 Argon Card (Weekly limit)
-                if let argonGroup = groups.first(where: { $0.displayName.lowercased().contains("argon") }) {
-                    singleWindowBentoCard(
-                        cardId: "\(cardNamespace)-argon",
-                        group: argonGroup,
-                        now: now
-                    )
+                ForEach(visibleGroups) { group in
+                    if group.buckets.count >= 2 {
+                        dualWindowBentoCard(
+                            cardId: "\(cardNamespace)-\(group.id)",
+                            group: group,
+                            now: now
+                        )
+                    } else {
+                        singleWindowBentoCard(
+                            cardId: "\(cardNamespace)-\(group.id)",
+                            group: group,
+                            now: now
+                        )
+                    }
                 }
             }
         }
     }
 
-    /// Bento card for groups with both 5h and Weekly limits (Gemini Models & Claude/GPT Models).
+    /// Bento card for groups with multiple windows (e.g. 5h + Weekly).
     private func dualWindowBentoCard(cardId: String, group: QuotaGroup, now: Date) -> some View {
-        let fiveHourBucket = group.buckets.first(where: { $0.window.lowercased() == "5h" }) ?? group.buckets.first
-        let weeklyBucket = group.buckets.first(where: { $0.window.lowercased() == "weekly" })
+        let primaryBucket = group.buckets.first(where: { $0.window.lowercased() == "5h" })
+            ?? group.buckets.first(where: { $0.window.lowercased() == "daily" })
+            ?? group.buckets.first
+        let secondaryBucket = group.buckets.first(where: { $0.id != primaryBucket?.id && $0.window.lowercased() == "weekly" })
+            ?? group.buckets.first(where: { $0.id != primaryBucket?.id })
+
+        let primaryPrefix: String = {
+            let w = (primaryBucket?.window ?? "").lowercased()
+            if w == "5h" || w == "5hr" || w == "five_hour" { return "5h" }
+            if w == "weekly" { return "Wk" }
+            if w == "daily" { return "1d" }
+            return primaryBucket?.window ?? ""
+        }()
 
         return GlassBentoCard(cardId: cardId, viewModel: viewModel, cornerRadius: 15, padding: 11) {
             HStack(spacing: 12) {
-                if let primary = fiveHourBucket {
+                if let primary = primaryBucket {
                     GlassCircularGauge(
                         fraction: primary.remainingFraction,
                         size: 46,
@@ -223,7 +255,7 @@ struct QuotaBentoContentListView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
-                    // Header + 5h limit row
+                    // Header + primary limit row
                     HStack(alignment: .firstTextBaseline) {
                         Text(group.displayName)
                             .font(.system(size: 12.5, weight: .semibold, design: .rounded))
@@ -232,11 +264,12 @@ struct QuotaBentoContentListView: View {
 
                         Spacer()
 
-                        if let primary = fiveHourBucket {
+                        if let primary = primaryBucket {
+                            let prefix = primaryPrefix.isEmpty ? "" : "\(primaryPrefix): "
                             Text(
                                 primary.remainingPercentage < 100
-                                    ? "5h: \(primary.remainingPercentage)% · \(primary.formattedResetDuration(relativeTo: now) ?? "soon")"
-                                    : "5h: 100% left"
+                                    ? "\(prefix)\(primary.remainingPercentage)% · \(primary.formattedResetDuration(relativeTo: now) ?? "soon")"
+                                    : "\(prefix)100% left"
                             )
                             .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                             .monospacedDigit()
@@ -244,19 +277,19 @@ struct QuotaBentoContentListView: View {
                         }
                     }
 
-                    // Weekly limit row + progress bar
-                    if let weekly = weeklyBucket {
+                    // Secondary limit row + progress bar
+                    if let secondary = secondaryBucket {
                         VStack(alignment: .leading, spacing: 3.5) {
                             HStack {
-                                Text("Weekly limit")
+                                Text(secondary.windowLabel)
                                     .font(.system(size: 10.5, weight: .medium, design: .rounded))
                                     .foregroundColor(Color.white.opacity(0.55))
 
                                 Spacer()
 
                                 Text(
-                                    weekly.remainingPercentage < 100
-                                        ? "\(weekly.remainingPercentage)% left · \(weekly.formattedResetDuration(relativeTo: now) ?? "")"
+                                    secondary.remainingPercentage < 100
+                                        ? "\(secondary.remainingPercentage)% left · \(secondary.formattedResetDuration(relativeTo: now) ?? "")"
                                         : "100% left"
                                 )
                                 .font(.system(size: 10.5, weight: .semibold, design: .rounded))
@@ -264,10 +297,26 @@ struct QuotaBentoContentListView: View {
                                 .foregroundColor(Color.white.opacity(0.85))
                             }
 
-                            GlassProgressBar(fraction: weekly.remainingFraction, height: 4)
+                            GlassProgressBar(fraction: secondary.remainingFraction, height: 4)
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private var allHiddenStateBento: some View {
+        GlassBentoCard(cardId: "\(cardNamespace)-hidden", viewModel: viewModel, cornerRadius: 15, padding: 12) {
+            HStack(spacing: 10) {
+                Text("All models are hidden")
+                    .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                    .foregroundColor(Color.white.opacity(0.72))
+                Spacer()
+                Button("Show All") {
+                    viewModel.showAllGroups()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
     }
@@ -386,7 +435,7 @@ struct UsageWidgetView: View {
             if viewModel.isCompactMode {
                 compactGlassPillView
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
             } else {
                 VStack(alignment: .leading, spacing: 9) {
                     headerBar
@@ -396,8 +445,8 @@ struct UsageWidgetView: View {
             }
         }
         .frame(
-            width: 356,
-            height: viewModel.isCompactMode ? 68 : 280
+            width: UsageWidgetLayout.targetSize(for: viewModel).width,
+            height: UsageWidgetLayout.targetSize(for: viewModel).height
         )
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.16)) {
@@ -476,33 +525,45 @@ struct UsageWidgetView: View {
         .frame(height: 22)
     }
 
-    // MARK: - Compact Floating Glass Pill Layout (All 5 metrics: Gem 5h, Gem Wk, Claude 5h, Claude Wk, Argon)
+    // MARK: - Compact Floating Glass Pill Layout (Dynamic visible metrics)
     private var compactGlassPillView: some View {
-        let items = viewModel.snapshot.iosRingItems(relativeTo: viewModel.snapshot.timestamp)
+        let items = viewModel.snapshot
+            .iosRingItems(relativeTo: viewModel.snapshot.timestamp)
+            .filter { viewModel.isGroupVisible($0.groupId) }
 
         return HStack(spacing: 6) {
-            ForEach(items.prefix(5)) { item in
-                HStack(spacing: 4.5) {
-                    GlassCircularGauge(
-                        fraction: item.remainingFraction,
-                        size: 24,
-                        lineWidth: 2.8,
-                        showPercentageText: false
-                    )
-
-                    VStack(alignment: .leading, spacing: 0.5) {
-                        Text("\(item.remainingPercentage)%")
-                            .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(.white)
-
-                        Text(shortPillLabel(item.title))
-                            .font(.system(size: 8.5, weight: .medium, design: .rounded))
-                            .foregroundColor(Color.white.opacity(0.55))
-                            .lineLimit(1)
-                    }
+            if items.isEmpty && !viewModel.snapshot.quotaGroups.isEmpty {
+                Text("Models hidden")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(Color.white.opacity(0.70))
+                Spacer()
+                glassPillButton(title: "Show All", systemName: "eye") {
+                    viewModel.showAllGroups()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(items.prefix(6)) { item in
+                    HStack(spacing: 4.5) {
+                        GlassCircularGauge(
+                            fraction: item.remainingFraction,
+                            size: 24,
+                            lineWidth: 2.8,
+                            showPercentageText: false
+                        )
+
+                        VStack(alignment: .leading, spacing: 0.5) {
+                            Text("\(item.remainingPercentage)%")
+                                .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundColor(.white)
+
+                            Text(shortPillLabel(item.title))
+                                .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                                .foregroundColor(Color.white.opacity(0.55))
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             glassIconButton(

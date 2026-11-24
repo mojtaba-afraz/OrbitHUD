@@ -101,9 +101,7 @@ final class WidgetWindowManager {
         autosaveName: String,
         defaultOriginOffset: CGPoint
     ) -> WidgetPanel {
-        let initialSize = viewModel.isCompactMode
-            ? CGSize(width: 356, height: 68)
-            : CGSize(width: 356, height: 280)
+        let initialSize = UsageWidgetLayout.targetSize(for: viewModel)
         let screenRect = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let origin = CGPoint(
             x: screenRect.maxX - initialSize.width - defaultOriginOffset.x,
@@ -136,9 +134,7 @@ final class WidgetWindowManager {
     }
 
     func applyConfiguration() {
-        let targetSize = viewModel.isCompactMode
-            ? CGSize(width: 356, height: 68)
-            : CGSize(width: 356, height: 280)
+        let targetSize = UsageWidgetLayout.targetSize(for: viewModel)
 
         // 1. Desktop Pinned Widget Window (just below normal app windows so it stays on desktop & accepts mouse drags)
         if let desktopPanel {

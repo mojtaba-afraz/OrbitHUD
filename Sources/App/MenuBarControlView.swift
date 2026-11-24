@@ -41,8 +41,39 @@ struct MenuBarControlView: View {
                 .controlSize(.small)
             }
 
-            // Full Usage Bento Cards (Gemini 5h+Weekly, Claude/GPT 5h+Weekly, Argon 4 Weekly)
+            // Full Usage Bento Cards (Dynamic models)
             QuotaBentoContentListView(viewModel: viewModel, cardNamespace: "menubar")
+
+            if !viewModel.snapshot.quotaGroups.isEmpty {
+                Divider().overlay(Color.white.opacity(0.12))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Visible Models")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        if !viewModel.hiddenGroupIds.isEmpty {
+                            Button("Show All") {
+                                viewModel.showAllGroups()
+                            }
+                            .buttonStyle(.link)
+                            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                        }
+                    }
+
+                    ForEach(viewModel.snapshot.quotaGroups) { group in
+                        Toggle(
+                            group.displayName,
+                            isOn: Binding(
+                                get: { viewModel.isGroupVisible(group.id) },
+                                set: { _ in viewModel.toggleGroupVisibility(group.id) }
+                            )
+                        )
+                        .font(.system(size: 11, design: .rounded))
+                    }
+                }
+            }
 
             Divider().overlay(Color.white.opacity(0.12))
 

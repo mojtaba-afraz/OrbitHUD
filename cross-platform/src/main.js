@@ -44,23 +44,65 @@ const STATE_PATH = path.join(
 
 const DEFAULT_STATE = {
   mode: "floating", // "floating" | "desktop"
-  compact: false, // false = Bento Glass (356x280), true = Compact Pill (356x68)
+  compact: false, // false = Bento Glass (dynamic height), true = Compact Pill (height 52)
   locked: false,
   opacity: 0.96,
   x: null,
   y: null,
+  hiddenGroupIds: [],
   lastQuotaData: null,
 };
 
 let state = loadState();
+let measuredBentoHeight = null;
 
 function loadState() {
   try {
     const raw = fs.readFileSync(STATE_PATH, "utf8");
-    return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    const merged = { ...DEFAULT_STATE, ...parsed };
+    merged.hiddenGroupIds = Array.isArray(merged.hiddenGroupIds)
+      ? merged.hiddenGroupIds.filter((id) => typeof id === "string")
+      : [];
+    return merged;
   } catch {
     return { ...DEFAULT_STATE };
   }
+}
+
+function getVisibleGroups() {
+  const groups = state.lastQuotaData?.groups || [];
+  const hidden = new Set(state.hiddenGroupIds || []);
+  return groups.filter((g) => !hidden.has(g.id));
+}
+
+function getVisibleRingItems() {
+  const items = state.lastQuotaData?.ringItems || [];
+  const hidden = new Set(state.hiddenGroupIds || []);
+  return items.filter((it) => !it.groupId || !hidden.has(it.groupId));
+}
+
+function toggleGroupVisibility(groupId) {
+  if (!groupId || typeof groupId !== "string") return;
+  const set = new Set(state.hiddenGroupIds || []);
+  if (set.has(groupId)) {
+    set.delete(groupId);
+  } else {
+    set.add(groupId);
+  }
+  state.hiddenGroupIds = Array.from(set);
+  measuredBentoHeight = null;
+  saveState();
+  applyWindowMode();
+  sendStateToRenderer();
+}
+
+function showAllGroups() {
+  state.hiddenGroupIds = [];
+  measuredBentoHeight = null;
+  saveState();
+  applyWindowMode();
+  sendStateToRenderer();
 }
 
 function saveState() {
@@ -85,14 +127,49 @@ function hasVisibleUpdateBanner() {
 // 12px transparent halo around the rounded card so CSS drop-shadow never clips at window edges
 const WINDOW_SHADOW_PAD = 12;
 
+function computeEstimatedBentoHeight() {
+  const allGroups = state.lastQuotaData?.groups || [];
+  const visibleGroups = getVisibleGroups();
+  const bannerExtra = hasVisibleUpdateBanner() ? 42 : 0;
+
+  if (allGroups.length === 0 || visibleGroups.length === 0) {
+    return 108 + bannerExtra;
+  }
+
+  // Outer card padding (28) + header (22) + gap (10)
+  let h = 60 + bannerExtra;
+  visibleGroups.forEach((group, idx) => {
+    const isDual = Array.isArray(group.buckets) && group.buckets.length >= 2;
+    h += isDual ? 80 : 72;
+    if (idx > 0) h += 10;
+  });
+  return Math.min(Math.max(h, 108), 640);
+}
+
 function getTargetDimensions() {
   if (state.compact) {
+    const visibleCount = getVisibleRingItems().length;
+    let cardWidth = 368;
+    if (visibleCount === 0) {
+      cardWidth = 276;
+    } else if (visibleCount <= 2) {
+      cardWidth = 256;
+    } else if (visibleCount === 3) {
+      cardWidth = 316;
+    } else if (visibleCount <= 5) {
+      cardWidth = 368;
+    } else {
+      cardWidth = 428;
+    }
     return {
-      width: 368 + WINDOW_SHADOW_PAD * 2,
-      height: 68 + WINDOW_SHADOW_PAD * 2,
+      width: cardWidth + WINDOW_SHADOW_PAD * 2,
+      height: 52 + WINDOW_SHADOW_PAD * 2,
     };
   }
-  const cardHeight = hasVisibleUpdateBanner() ? 316 : 280;
+  const cardHeight =
+    typeof measuredBentoHeight === "number"
+      ? measuredBentoHeight
+      : computeEstimatedBentoHeight();
   return {
     width: 356 + WINDOW_SHADOW_PAD * 2,
     height: cardHeight + WINDOW_SHADOW_PAD * 2,
@@ -223,6 +300,7 @@ function sendStateToRenderer() {
     compact: state.compact,
     locked: state.locked,
     opacity: state.opacity,
+    hiddenGroupIds: state.hiddenGroupIds,
     quotaData: state.lastQuotaData,
     appVersion: app.getVersion(),
     update: {
@@ -325,9 +403,14 @@ async function startAutoUpdateDownload() {
 }
 
 async function refreshQuota() {
+  const prevCount = state.lastQuotaData?.groups?.length || 0;
   const live = await fetchLiveQuotaSummary();
   if (live) {
     state.lastQuotaData = live;
+    if ((live.groups?.length || 0) !== prevCount) {
+      measuredBentoHeight = null;
+      applyWindowMode();
+    }
     saveState();
   }
   sendStateToRenderer();
@@ -335,19 +418,55 @@ async function refreshQuota() {
 }
 
 function buildControlMenuTemplate() {
-  const items = state.lastQuotaData?.ringItems || [];
+  const allGroups = state.lastQuotaData?.groups || [];
+  const hiddenSet = new Set(state.hiddenGroupIds || []);
+  const items = getVisibleRingItems();
   const summaryLines =
     items.length > 0
       ? items.map((it) => ({
           label: `${it.title}: ${it.remainingPercentage}% (${it.subtitle})`,
           enabled: false,
         }))
-      : [{ label: "Waiting for Antigravity live quota...", enabled: false }];
+      : [
+          {
+            label:
+              allGroups.length > 0
+                ? "All models hidden (enable in Visible Models)"
+                : "Waiting for Antigravity live quota...",
+            enabled: false,
+          },
+        ];
+
+  const visibleModelsSubmenu =
+    allGroups.length > 0
+      ? [
+          ...allGroups.map((g) => ({
+            label: g.displayName,
+            type: "checkbox",
+            checked: !hiddenSet.has(g.id),
+            click: () => toggleGroupVisibility(g.id),
+          })),
+          ...(hiddenSet.size > 0
+            ? [
+                { type: "separator" },
+                {
+                  label: "Show All Models",
+                  click: () => showAllGroups(),
+                },
+              ]
+            : []),
+        ]
+      : [{ label: "No models detected yet", enabled: false }];
 
   return [
     { label: "OrbitHUD — Antigravity Usage", enabled: false },
     { type: "separator" },
     ...summaryLines,
+    { type: "separator" },
+    {
+      label: "Visible Models",
+      submenu: visibleModelsSubmenu,
+    },
     { type: "separator" },
     {
       label: "Floating Mode (Always on Top)",
@@ -378,6 +497,7 @@ function buildControlMenuTemplate() {
       checked: state.compact,
       click: () => {
         state.compact = !state.compact;
+        measuredBentoHeight = null;
         saveState();
         applyWindowMode();
         sendStateToRenderer();
@@ -476,10 +596,31 @@ ipcMain.handle("widget:toggle-mode", () => {
 
 ipcMain.handle("widget:toggle-compact", () => {
   state.compact = !state.compact;
+  measuredBentoHeight = null;
   saveState();
   applyWindowMode();
   sendStateToRenderer();
   return state;
+});
+
+ipcMain.handle("widget:toggle-group-visibility", (_event, groupId) => {
+  toggleGroupVisibility(groupId);
+  return state;
+});
+
+ipcMain.handle("widget:show-all-groups", () => {
+  showAllGroups();
+  return state;
+});
+
+ipcMain.on("widget:sync-height", (_event, cardHeight) => {
+  if (state.compact) return;
+  if (typeof cardHeight !== "number" || !Number.isFinite(cardHeight)) return;
+  const clamped = Math.min(Math.max(Math.ceil(cardHeight), 84), 680);
+  if (measuredBentoHeight === null || Math.abs(measuredBentoHeight - clamped) > 2) {
+    measuredBentoHeight = clamped;
+    applyWindowMode();
+  }
 });
 
 ipcMain.handle("widget:refresh", async () => {
@@ -507,6 +648,7 @@ ipcMain.on("widget:start-update", () => {
 
 ipcMain.on("widget:dismiss-update", () => {
   updateState.dismissed = true;
+  measuredBentoHeight = null;
   applyWindowMode();
   sendStateToRenderer();
 });

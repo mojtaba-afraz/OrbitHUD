@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld("antigravityWidget", {
   },
   toggleMode: () => ipcRenderer.invoke("widget:toggle-mode"),
   toggleCompact: () => ipcRenderer.invoke("widget:toggle-compact"),
+  toggleGroupVisibility: (groupId) =>
+    ipcRenderer.invoke("widget:toggle-group-visibility", groupId),
+  showAllGroups: () => ipcRenderer.invoke("widget:show-all-groups"),
+  syncHeight: (cardHeight) => ipcRenderer.send("widget:sync-height", cardHeight),
   refresh: () => ipcRenderer.invoke("widget:refresh"),
   showMenu: () => ipcRenderer.send("widget:show-menu"),
   quit: () => ipcRenderer.send("widget:quit"),

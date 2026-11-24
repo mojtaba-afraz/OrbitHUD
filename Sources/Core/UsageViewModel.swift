@@ -35,9 +35,35 @@ public final class UsageViewModel: ObservableObject {
             restartTimer()
         }
     }
+    @Published public var hiddenGroupIds: Set<String> {
+        didSet {
+            UserDefaults.standard.set(Array(hiddenGroupIds), forKey: "hiddenGroupIds_v1")
+            onWindowConfigChanged?()
+        }
+    }
     @Published public var isRefreshing: Bool = false
     @Published public var isWidgetHovered: Bool = false
     @Published public var hoveredCardId: String? = nil
+
+    public var visibleQuotaGroups: [QuotaGroup] {
+        snapshot.quotaGroups.filter { !hiddenGroupIds.contains($0.id) }
+    }
+
+    public func isGroupVisible(_ groupId: String) -> Bool {
+        groupId.isEmpty || !hiddenGroupIds.contains(groupId)
+    }
+
+    public func toggleGroupVisibility(_ groupId: String) {
+        if hiddenGroupIds.contains(groupId) {
+            hiddenGroupIds.remove(groupId)
+        } else {
+            hiddenGroupIds.insert(groupId)
+        }
+    }
+
+    public func showAllGroups() {
+        hiddenGroupIds.removeAll()
+    }
 
     public var onWindowConfigChanged: (() -> Void)?
 
@@ -55,6 +81,8 @@ public final class UsageViewModel: ObservableObject {
         self.windowOpacity = savedOpacity > 0.2 ? savedOpacity : 0.96
         let savedInterval = UserDefaults.standard.integer(forKey: "refreshIntervalSeconds")
         self.refreshIntervalSeconds = savedInterval >= 10 ? savedInterval : 30
+        let savedHidden = UserDefaults.standard.stringArray(forKey: "hiddenGroupIds_v1") ?? []
+        self.hiddenGroupIds = Set(savedHidden)
 
         if let loaded = SharedSnapshotStorage.load(), !loaded.quotaGroups.isEmpty {
             self.snapshot = loaded
@@ -100,6 +128,7 @@ public final class UsageViewModel: ObservableObject {
         let tokenUsage = await tokenUsageTask
 
         if let liveGroups, !liveGroups.isEmpty {
+            let prevIds = self.snapshot.quotaGroups.map(\.id)
             let newSnapshot = AntigravityUsageSnapshot(
                 timestamp: Date(),
                 isLanguageServerConnected: true,
@@ -110,6 +139,9 @@ public final class UsageViewModel: ObservableObject {
             )
             self.snapshot = newSnapshot
             SharedSnapshotStorage.save(newSnapshot)
+            if liveGroups.map(\.id) != prevIds {
+                onWindowConfigChanged?()
+            }
         } else if !self.snapshot.quotaGroups.isEmpty {
             var cached = self.snapshot
             cached.timestamp = Date()

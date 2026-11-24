@@ -54,41 +54,75 @@ function renderCircularGauge(fraction, size = 46, strokeWidth = 4.5, showText = 
   `;
 }
 
+function shortWindowPrefix(bucket) {
+  const w = (bucket?.window || "").toLowerCase();
+  if (w === "5h" || w === "5hr" || w === "five_hour") return "5h";
+  if (w === "weekly") return "Wk";
+  if (w === "daily") return "1d";
+  return bucket?.window || "";
+}
+
+function formatShortPillName(title) {
+  if (!title) return "";
+  if (title === "Gemini 5h") return "Gem 5h";
+  if (title === "Gemini Wk") return "Gem Wk";
+  if (title === "Claude 5h") return "Cld 5h";
+  if (title === "Claude Wk") return "Cld Wk";
+  if (title === "Argon 4") return "Argon";
+  // Shorten verbose future model names cleanly (e.g., "Gemini 4 Neon 5h" -> "Neon 5h")
+  const cleaned = title
+    .replace(/^Gemini\s+\d+(?:\.\d+)?\s+/i, "")
+    .replace(/\bModels?\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > 10 ? `${cleaned.slice(0, 9)}…` : cleaned;
+}
+
 function renderDualWindowBentoCard(group) {
   if (!group || !group.buckets || group.buckets.length === 0) return "";
-  const fiveH = group.buckets.find((b) => b.window === "5h") || group.buckets[0];
-  const weekly = group.buckets.find((b) => b.window === "weekly");
-  const fiveHColor = semanticColor(fiveH.remainingFraction);
+  const primary =
+    group.buckets.find((b) => (b.window || "").toLowerCase() === "5h") ||
+    group.buckets.find((b) => (b.window || "").toLowerCase() === "daily") ||
+    group.buckets[0];
+  const secondary =
+    group.buckets.find(
+      (b) => b.id !== primary.id && (b.window || "").toLowerCase() === "weekly"
+    ) || group.buckets.find((b) => b.id !== primary.id);
+
+  const primaryColor = semanticColor(primary.remainingFraction);
+  const primaryPrefix = shortWindowPrefix(primary);
+  const primaryMeta =
+    primary.remainingPercentage < 100
+      ? `${primaryPrefix ? `${primaryPrefix}: ` : ""}${primary.remainingPercentage}% · ${primary.resetDuration || "soon"}`
+      : `${primaryPrefix ? `${primaryPrefix}: ` : ""}100% left`;
+
+  const secondaryLabel = secondary?.windowLabel || "Weekly limit";
 
   return `
     <div class="bento-card bento-hero">
-      ${renderCircularGauge(fiveH.remainingFraction, 46, 4.5, true)}
+      ${renderCircularGauge(primary.remainingFraction, 46, 4.5, true)}
       <div class="hero-details">
         <div class="hero-top-row">
-          <span class="hero-title">${group.displayName}</span>
-          <span class="hero-meta" style="color:${fiveHColor};font-weight:600">${
-            fiveH.remainingPercentage < 100
-              ? `5h: ${fiveH.remainingPercentage}% · ${fiveH.resetDuration || "soon"}`
-              : "5h: 100% left"
-          }</span>
+          <span class="hero-title" title="${group.displayName}">${group.displayName}</span>
+          <span class="hero-meta" style="color:${primaryColor};font-weight:600">${primaryMeta}</span>
         </div>
         ${
-          weekly
+          secondary
             ? `
           <div>
             <div class="weekly-row">
-              <span class="weekly-label">Weekly limit</span>
+              <span class="weekly-label">${secondaryLabel}</span>
               <span class="weekly-val">${
-                weekly.remainingPercentage < 100
-                  ? `${weekly.remainingPercentage}% left · ${weekly.resetDuration || ""}`
+                secondary.remainingPercentage < 100
+                  ? `${secondary.remainingPercentage}% left · ${secondary.resetDuration || ""}`
                   : "100% left"
               }</span>
             </div>
             <div class="glass-bar-track">
               <div class="glass-bar-fill" style="width:${Math.max(
-                weekly.remainingPercentage,
+                secondary.remainingPercentage,
                 4
-              )}%;background:${semanticColor(weekly.remainingFraction)}"></div>
+              )}%;background:${semanticColor(secondary.remainingFraction)}"></div>
             </div>
           </div>
         `
@@ -103,17 +137,18 @@ function renderSingleWindowBentoCard(group) {
   if (!group || !group.buckets || group.buckets.length === 0) return "";
   const b = group.buckets[0];
   const color = semanticColor(b.remainingFraction);
+  const winLabel = b.windowLabel || "Weekly limit";
   const sub =
     b.remainingPercentage < 100 && b.resetDuration
-      ? `Weekly limit · Resets in ${b.resetDuration}`
-      : "Weekly limit · Full";
+      ? `${winLabel} · Resets in ${b.resetDuration}`
+      : `${winLabel} · Full`;
 
   return `
     <div class="bento-card bento-hero">
       ${renderCircularGauge(b.remainingFraction, 42, 4.2, true)}
       <div class="hero-details">
         <div class="hero-top-row">
-          <span class="hero-title">${group.displayName}</span>
+          <span class="hero-title" title="${group.displayName}">${group.displayName}</span>
           <span class="tile-pct" style="color:${color}">${b.remainingPercentage}% left</span>
         </div>
         <div class="glass-bar-track">
@@ -215,37 +250,70 @@ function renderUpdateBanner(update) {
   }
 }
 
-function renderWidget(quotaData, isCompact) {
+function syncBentoHeightIfNeeded(isCompact) {
+  if (isCompact) return;
+  requestAnimationFrame(() => {
+    const rectHeight = Math.ceil(widgetCard.getBoundingClientRect().height);
+    if (rectHeight > 60 && window.antigravityWidget.syncHeight) {
+      window.antigravityWidget.syncHeight(rectHeight);
+    }
+  });
+}
+
+function bindCompactButtons() {
+  const pillUpdateBtn = document.getElementById("pill-update-btn");
+  if (pillUpdateBtn) {
+    pillUpdateBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      window.antigravityWidget.startUpdate();
+    });
+  }
+  const expandBtn = document.getElementById("expand-pill-btn");
+  if (expandBtn) {
+    expandBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      window.antigravityWidget.toggleCompact();
+    });
+  }
+  const pillMenuBtn = document.getElementById("pill-menu-btn");
+  if (pillMenuBtn) {
+    pillMenuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      window.antigravityWidget.showMenu();
+    });
+  }
+  const showAllBtn = document.getElementById("show-all-btn");
+  if (showAllBtn) {
+    showAllBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      window.antigravityWidget.showAllGroups();
+    });
+  }
+}
+
+function renderWidget(quotaData, isCompact, hiddenGroupIds = []) {
   widgetCard.classList.toggle("compact-mode", Boolean(isCompact));
 
   const groups = quotaData?.groups || [];
   const ringItems = quotaData?.ringItems || [];
+  const hiddenSet = new Set(Array.isArray(hiddenGroupIds) ? hiddenGroupIds : []);
+  const visibleGroups = groups.filter((g) => !hiddenSet.has(g.id));
+  const visibleRingItems = ringItems.filter(
+    (item) => !item.groupId || !hiddenSet.has(item.groupId)
+  );
 
   if (groups.length === 0) {
     if (isCompact) {
       bentoContainer.innerHTML = `
-        <div class="pill-row" style="justify-content:space-between;padding:4px 6px">
-          <span style="font-size:11px;color:rgba(255,255,255,0.65)">Waiting for Antigravity...</span>
-          <div style="display:flex;gap:4px">
+        <div class="pill-row">
+          <span class="empty-pill-text">Waiting for Antigravity...</span>
+          <div class="pill-actions">
             <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
             <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
           </div>
         </div>
       `;
-      const expandBtn = document.getElementById("expand-pill-btn");
-      if (expandBtn) {
-        expandBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          window.antigravityWidget.toggleCompact();
-        });
-      }
-      const pillMenuBtn = document.getElementById("pill-menu-btn");
-      if (pillMenuBtn) {
-        pillMenuBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          window.antigravityWidget.showMenu();
-        });
-      }
+      bindCompactButtons();
       return;
     }
     bentoContainer.innerHTML = `
@@ -253,31 +321,53 @@ function renderWidget(quotaData, isCompact) {
         <span>Waiting for Antigravity live quota...</span>
       </div>
     `;
+    syncBentoHeightIfNeeded(isCompact);
+    return;
+  }
+
+  if (visibleGroups.length === 0) {
+    if (isCompact) {
+      bentoContainer.innerHTML = `
+        <div class="pill-row">
+          <span class="empty-pill-text">All models hidden</span>
+          <div class="pill-actions">
+            <button id="show-all-btn" class="glass-pill-btn">Show All</button>
+            <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
+            <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
+          </div>
+        </div>
+      `;
+      bindCompactButtons();
+      return;
+    }
+    bentoContainer.innerHTML = `
+      <div class="bento-card empty-card">
+        <span>All models are hidden</span>
+        <button id="show-all-btn" class="glass-pill-btn">Show All</button>
+      </div>
+    `;
+    const showAllBtn = document.getElementById("show-all-btn");
+    if (showAllBtn) {
+      showAllBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.antigravityWidget.showAllGroups();
+      });
+    }
+    syncBentoHeightIfNeeded(isCompact);
     return;
   }
 
   if (isCompact) {
     bentoContainer.innerHTML = `
       <div class="pill-row">
-        ${ringItems
-          .slice(0, 5)
+        ${visibleRingItems
+          .slice(0, 6)
           .map((item) => {
-            const shortName =
-              item.title === "Gemini 5h"
-                ? "Gem 5h"
-                : item.title === "Gemini Wk"
-                ? "Gem Wk"
-                : item.title === "Claude 5h"
-                ? "Cld 5h"
-                : item.title === "Claude Wk"
-                ? "Cld Wk"
-                : item.title === "Argon 4"
-                ? "Argon"
-                : item.title;
+            const shortName = formatShortPillName(item.title);
             return `
-              <div class="pill-item">
+              <div class="pill-item" title="${item.title}: ${item.remainingPercentage}% (${item.subtitle || ""})">
                 ${renderCircularGauge(item.remainingFraction, 24, 2.8, false)}
-                <div>
+                <div class="pill-text">
                   <div class="pill-pct">${item.remainingPercentage}%</div>
                   <div class="pill-name">${shortName}</div>
                 </div>
@@ -285,61 +375,31 @@ function renderWidget(quotaData, isCompact) {
             `;
           })
           .join("")}
-        ${
-          latestUpdateState &&
-          latestUpdateState.status === "available" &&
-          !latestUpdateState.dismissed
-            ? `<button id="pill-update-btn" class="glass-icon-btn update-pill-btn" title="Install Update v${latestUpdateState.latestVersion}">↑</button>`
-            : ""
-        }
-        <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
-        <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
+        <div class="pill-actions">
+          ${
+            latestUpdateState &&
+            latestUpdateState.status === "available" &&
+            !latestUpdateState.dismissed
+              ? `<button id="pill-update-btn" class="glass-icon-btn update-pill-btn" title="Install Update v${latestUpdateState.latestVersion}">↑</button>`
+              : ""
+          }
+          <button id="expand-pill-btn" class="glass-icon-btn" title="Expand Bento View">⤢</button>
+          <button id="pill-menu-btn" class="glass-icon-btn" title="Settings & Controls">⚙</button>
+        </div>
       </div>
     `;
-    const pillUpdateBtn = document.getElementById("pill-update-btn");
-    if (pillUpdateBtn) {
-      pillUpdateBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        window.antigravityWidget.startUpdate();
-      });
-    }
-    const expandBtn = document.getElementById("expand-pill-btn");
-    if (expandBtn) {
-      expandBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        window.antigravityWidget.toggleCompact();
-      });
-    }
-    const pillMenuBtn = document.getElementById("pill-menu-btn");
-    if (pillMenuBtn) {
-      pillMenuBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        window.antigravityWidget.showMenu();
-      });
-    }
+    bindCompactButtons();
     return;
   }
 
-  const geminiGroup =
-    groups.find(
-      (g) =>
-        g.displayName.toLowerCase().includes("gemini") &&
-        !g.displayName.toLowerCase().includes("argon")
-    ) || groups[0];
-  const claudeGroup = groups.find(
-    (g) =>
-      g.displayName.toLowerCase().includes("claude") ||
-      g.displayName.toLowerCase().includes("gpt")
-  );
-  const argonGroup = groups.find((g) =>
-    g.displayName.toLowerCase().includes("argon")
-  );
-
-  bentoContainer.innerHTML = `
-    ${renderDualWindowBentoCard(geminiGroup)}
-    ${renderDualWindowBentoCard(claudeGroup)}
-    ${renderSingleWindowBentoCard(argonGroup)}
-  `;
+  bentoContainer.innerHTML = visibleGroups
+    .map((group) =>
+      Array.isArray(group.buckets) && group.buckets.length >= 2
+        ? renderDualWindowBentoCard(group)
+        : renderSingleWindowBentoCard(group)
+    )
+    .join("");
+  syncBentoHeightIfNeeded(isCompact);
 }
 
 window.antigravityWidget.onStateUpdate((state) => {
@@ -349,7 +409,7 @@ window.antigravityWidget.onStateUpdate((state) => {
   widgetCard.classList.toggle("locked", Boolean(state.locked));
   latestUpdateState = state.update || null;
   renderUpdateBanner(latestUpdateState);
-  renderWidget(state.quotaData, state.compact);
+  renderWidget(state.quotaData, state.compact, state.hiddenGroupIds || []);
 });
 
 modeBtn.addEventListener("click", (e) => {

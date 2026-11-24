@@ -144,8 +144,61 @@ assert.equal(parsed.ringItems[3].subtitle, "Full");
 assert.equal(parsed.ringItems[4].title, "Argon 4");
 assert.equal(parsed.ringItems[4].remainingPercentage, 93);
 assert.equal(parsed.ringItems[4].subtitle, "↻ 6d 22h");
+assert.equal(parsed.ringItems[0].groupId, "Gemini Models");
+assert.equal(parsed.ringItems[2].groupId, "Claude and GPT models");
+assert.equal(parsed.ringItems[4].groupId, "Gemini 4 Argon");
+assert.equal(parsed.groups[0].buckets[0].windowLabel, "Weekly limit");
+assert.equal(parsed.groups[0].buckets[1].windowLabel, "5h limit");
 
-console.log("  ✓ RetrieveUserQuotaSummary parser & iOS ring items mapping passed");
+// 3. Test dynamic / future unknown model groups (resilience against Google model changes)
+const futureQuotaResponse = {
+  response: {
+    groups: [
+      {
+        displayName: "Future Ultra Model",
+        buckets: [
+          {
+            bucketId: "ultra-weekly",
+            displayName: "Weekly Limit",
+            window: "weekly",
+            remainingFraction: 0.8,
+            resetTime: "2026-11-29T12:00:00Z",
+          },
+          {
+            bucketId: "ultra-5h",
+            displayName: "5h Limit",
+            window: "5h",
+            remainingFraction: 0.6,
+            resetTime: "2026-11-23T14:00:00Z",
+          },
+        ],
+      },
+      {
+        displayName: "Daily Experimental Pool",
+        buckets: [
+          {
+            bucketId: "exp-daily",
+            displayName: "Daily Limit",
+            window: "daily",
+            remainingFraction: 0.5,
+            resetTime: "2026-11-24T11:00:00Z",
+          },
+        ],
+      },
+    ],
+  },
+};
+const parsedFuture = parseQuotaSummaryResponse(futureQuotaResponse, refNowMs);
+assert.ok(parsedFuture);
+assert.equal(parsedFuture.groups.length, 2);
+assert.equal(parsedFuture.ringItems.length, 3);
+assert.equal(parsedFuture.ringItems[0].title, "Future Ultra Model 5h");
+assert.equal(parsedFuture.ringItems[0].groupId, "Future Ultra Model");
+assert.equal(parsedFuture.ringItems[1].title, "Future Ultra Model Wk");
+assert.equal(parsedFuture.ringItems[2].title, "Daily Experimental Pool");
+assert.equal(parsedFuture.groups[1].buckets[0].windowLabel, "Daily limit");
+
+console.log("  ✓ RetrieveUserQuotaSummary parser & dynamic group/ring mapping passed");
 
 // 4. Test Auto-Updater semver comparison & asset selection
 assert.equal(compareSemver("v1.0.4", "1.0.3") > 0, true);

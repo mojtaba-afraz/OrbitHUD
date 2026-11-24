@@ -29,13 +29,22 @@ public enum WidgetDisplayMode: String, CaseIterable, Codable, Identifiable {
 
 public struct QuotaRingItem: Identifiable, Equatable {
     public let id: String
+    public let groupId: String
     public let title: String
     public let subtitle: String
     public let remainingFraction: Double
     public let category: String
 
-    public init(id: String, title: String, subtitle: String, remainingFraction: Double, category: String) {
+    public init(
+        id: String,
+        groupId: String = "",
+        title: String,
+        subtitle: String,
+        remainingFraction: Double,
+        category: String
+    ) {
         self.id = id
+        self.groupId = groupId
         self.title = title
         self.subtitle = subtitle
         self.remainingFraction = min(max(remainingFraction, 0.0), 1.0)
@@ -285,7 +294,7 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
         for group in quotaGroups {
             let lowerName = group.displayName.lowercased()
 
-            if lowerName.contains("gemini models") || (lowerName.contains("gemini") && !lowerName.contains("argon")) {
+            if lowerName.contains("gemini models") || (lowerName.contains("gemini") && !lowerName.contains("argon") && group.buckets.contains(where: { $0.window.lowercased() == "5h" })) {
                 let sortedBuckets = group.buckets.sorted { a, _ in a.window.lowercased() == "5h" }
                 for bucket in sortedBuckets {
                     let is5h = bucket.window.lowercased() == "5h"
@@ -299,6 +308,7 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
                     items.append(
                         QuotaRingItem(
                             id: bucket.id,
+                            groupId: group.id,
                             title: title,
                             subtitle: sub,
                             remainingFraction: bucket.remainingFraction,
@@ -317,6 +327,7 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
                     items.append(
                         QuotaRingItem(
                             id: bucket.id,
+                            groupId: group.id,
                             title: "Argon 4",
                             subtitle: sub,
                             remainingFraction: bucket.remainingFraction,
@@ -338,6 +349,7 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
                     items.append(
                         QuotaRingItem(
                             id: bucket.id,
+                            groupId: group.id,
                             title: title,
                             subtitle: sub,
                             remainingFraction: bucket.remainingFraction,
@@ -346,12 +358,22 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
                     )
                 }
             } else {
-                for bucket in group.buckets {
-                    let sub = bucket.formattedResetDuration(relativeTo: now).map { "↻ \($0)" } ?? bucket.windowLabel
+                let sortedBuckets = group.buckets.sorted { a, _ in a.window.lowercased() == "5h" }
+                for bucket in sortedBuckets {
+                    let w = bucket.window.lowercased()
+                    let tag = (w == "5h" || w == "5hr" || w == "five_hour") ? "5h" : (w == "weekly" ? "Wk" : (w == "daily" ? "1d" : bucket.window))
+                    let title = (sortedBuckets.count > 1 && !tag.isEmpty) ? "\(group.displayName) \(tag)" : group.displayName
+                    let sub: String
+                    if bucket.remainingPercentage < 100, let dur = bucket.formattedResetDuration(relativeTo: now) {
+                        sub = "↻ \(dur)"
+                    } else {
+                        sub = bucket.windowLabel
+                    }
                     items.append(
                         QuotaRingItem(
                             id: bucket.id,
-                            title: group.displayName,
+                            groupId: group.id,
+                            title: title,
                             subtitle: sub,
                             remainingFraction: bucket.remainingFraction,
                             category: "other"
