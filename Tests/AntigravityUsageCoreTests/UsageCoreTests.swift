@@ -93,7 +93,7 @@ final class UsageCoreTests: XCTestCase {
         let jsonString = """
         {
           "five_hour": { "utilization": 33.0, "resets_at": "2026-11-23T14:00:00.500Z" },
-          "seven_day": { "utilization": 0.25, "resets_at": "2026-11-29T11:00:00Z" },
+          "seven_day": { "utilization": 1.0, "resets_at": "2026-11-29T11:00:00Z" },
           "seven_day_sonnet": { "utilization": 10.0, "resetsAt": "2026-11-29T11:00:00Z" },
           "seven_day_opus": { "utilization": 50.0, "resets_at": "2026-11-29T11:00:00Z" }
         }
@@ -110,7 +110,7 @@ final class UsageCoreTests: XCTestCase {
         XCTAssertEqual(primary?.buckets[0].remainingPercentage, 67)
         XCTAssertNotNil(primary?.buckets[0].resetTime)
         XCTAssertEqual(primary?.buckets[1].window, "weekly")
-        XCTAssertEqual(primary?.buckets[1].remainingPercentage, 75)
+        XCTAssertEqual(primary?.buckets[1].remainingPercentage, 99)
         XCTAssertNotNil(primary?.buckets[1].resetTime)
 
         XCTAssertEqual(groups?[1].id, "claude-code::sonnet")
@@ -179,12 +179,34 @@ final class UsageCoreTests: XCTestCase {
         XCTAssertEqual(groups?[0].buckets[1].remainingPercentage, 60)
         XCTAssertEqual(groups?[0].buckets[1].resetTime?.timeIntervalSince1970 ?? 0, 1_760_604_800, accuracy: 0.5)
 
+        // Post-reset regression: 5h reset to 0% used (100% left), weekly at 1% used (must be 99% left, not 0%)
+        let postResetJson = """
+        {
+          "plan_type": "Plus",
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 0,
+              "limit_window_seconds": 18000,
+              "reset_after_seconds": 18000
+            },
+            "secondary_window": {
+              "used_percent": 1,
+              "limit_window_seconds": 604800,
+              "reset_after_seconds": 604800
+            }
+          }
+        }
+        """
+        let postResetGroups = CodexQuotaFetcher.parseUsageJSON(Data(postResetJson.utf8), now: refNow)
+        XCTAssertEqual(postResetGroups?[0].buckets[0].remainingPercentage, 100)
+        XCTAssertEqual(postResetGroups?[0].buckets[1].remainingPercentage, 99)
+
         // Daily window & missing plan_type
         let dailyJson = """
         {
           "rateLimit": {
             "primaryWindow": {
-              "usedPercent": 0.2,
+              "usedPercent": 20,
               "window_seconds": 86400,
               "reset_at": 1760086400
             }

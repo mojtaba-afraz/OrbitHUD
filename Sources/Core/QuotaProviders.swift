@@ -101,12 +101,13 @@ public final class ClaudeCodeQuotaFetcher {
             )
         }
 
-        var request = URLRequest(url: url, timeoutInterval: 6)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("claude-code/2.0.0", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -230,7 +231,7 @@ public final class ClaudeCodeQuotaFetcher {
 
         func makeBucket(id: String, window: String, dict: [String: Any]?) -> QuotaBucket? {
             guard let dict, let util = dict["utilization"] as? Double else { return nil }
-            let used = util > 1.0 ? util / 100.0 : util
+            let used = util / 100.0
             let remaining = min(max(1.0 - used, 0.0), 1.0)
             let resetISO = (dict["resets_at"] as? String) ?? (dict["resetsAt"] as? String)
             let resetDate = resetISO.flatMap(parseISODate)
@@ -321,11 +322,12 @@ public final class CodexQuotaFetcher {
             )
         }
 
-        var request = URLRequest(url: url, timeoutInterval: 6)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
         request.httpMethod = "GET"
         request.setValue("Bearer \(creds.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("codex-cli/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         if let accountId = creds.accountId, !accountId.isEmpty {
             request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
         }
@@ -450,7 +452,7 @@ public final class CodexQuotaFetcher {
                 window = fallbackWindow
             }
 
-            let usedFrac = usedVal > 1.0 ? usedVal / 100.0 : usedVal
+            let usedFrac = usedVal / 100.0
             let remaining = min(max(1.0 - usedFrac, 0.0), 1.0)
 
             var resetDate: Date? = nil

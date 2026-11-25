@@ -311,6 +311,40 @@ assert.equal(codexUsage.groups[0].buckets[1].remainingPercentage, 60);
 assert.equal(codexUsage.ringItems[0].title, "CDX 5h");
 assert.equal(codexUsage.ringItems[1].title, "CDX Wk");
 
+// Regression: 1% used (e.g. weekly after a 5h usage reset) must be 99% remaining, never 0%
+const codexPostReset = parseCodexUsageResponse(
+  {
+    plan_type: "Plus",
+    rate_limit: {
+      primary_window: {
+        used_percent: 0,
+        limit_window_seconds: 18000,
+        reset_after_seconds: 18000,
+      },
+      secondary_window: {
+        used_percent: 1,
+        limit_window_seconds: 604800,
+        reset_after_seconds: 604800,
+      },
+    },
+  },
+  refNowMs
+);
+assert.ok(codexPostReset);
+assert.equal(codexPostReset.groups[0].buckets[0].remainingPercentage, 100);
+assert.equal(codexPostReset.groups[0].buckets[1].remainingPercentage, 99);
+
+const claudeOnePercent = parseClaudeUsageResponse(
+  {
+    five_hour: { utilization: 0.0, resets_at: "2026-11-23T14:00:00Z" },
+    seven_day: { utilization: 1.0, resets_at: "2026-11-29T11:00:00Z" },
+  },
+  refNowMs
+);
+assert.ok(claudeOnePercent);
+assert.equal(claudeOnePercent.groups[0].buckets[0].remainingPercentage, 100);
+assert.equal(claudeOnePercent.groups[0].buckets[1].remainingPercentage, 99);
+
 const mergedMulti = mergeProviderResults(
   {
     antigravity: {

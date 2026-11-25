@@ -201,6 +201,7 @@ function requestClaudeUsage(accessToken) {
           "User-Agent": "claude-code/2.0.0",
           Accept: "application/json",
           "Content-Type": "application/json",
+          "Cache-Control": "no-cache",
         },
         timeout: 6000,
       },

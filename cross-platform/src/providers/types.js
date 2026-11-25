@@ -36,8 +36,8 @@ function clampFraction(val) {
 
 function utilizationToRemaining(utilization) {
   if (typeof utilization !== "number" || !Number.isFinite(utilization)) return 1.0;
-  // Handle both 0..100 (standard API) and 0..1 fractional inputs safely
-  const usedFraction = utilization > 1.0 ? utilization / 100.0 : utilization;
+  // Upstream APIs (Codex `used_percent`, Claude Code `utilization`) report 0..100 percentages
+  const usedFraction = utilization / 100.0;
   return clampFraction(1.0 - usedFraction);
 }
 

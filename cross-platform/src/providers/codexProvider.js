@@ -165,6 +165,7 @@ function requestCodexUsage(accessToken, accountId) {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/json",
       "User-Agent": "codex-cli/1.0",
+      "Cache-Control": "no-cache",
     };
     if (accountId) {
       headers["ChatGPT-Account-Id"] = accountId;
