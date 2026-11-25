@@ -764,7 +764,7 @@ struct UsageWidgetView: View {
                     systemName: "arrow.clockwise",
                     help: "Refresh Now"
                 ) {
-                    Task { await viewModel.refreshNow() }
+                    Task { await viewModel.refreshNow(forceExternal: true) }
                 }
             }
             .opacity(isWidgetHovered ? 1.0 : 0.0)
@@ -789,6 +789,23 @@ struct UsageWidgetView: View {
                 glassPillButton(title: "Show All", systemName: "eye") {
                     viewModel.showAllGroups()
                 }
+            } else if items.isEmpty, let status = viewModel.visibleStatusCards.first {
+                Circle()
+                    .fill(status.state == .authRequired || status.state == .rateLimited
+                          ? Color(red: 0.98, green: 0.72, blue: 0.22)
+                          : Color.white.opacity(0.35))
+                    .frame(width: 5.5, height: 5.5)
+                Text(status.message ?? "\(status.providerId.displayName) unavailable")
+                    .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                    .foregroundColor(Color.white.opacity(0.76))
+                    .lineLimit(1)
+                Spacer()
+            } else if items.isEmpty {
+                Text("Waiting for live quota...")
+                    .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                    .foregroundColor(Color.white.opacity(0.65))
+                    .lineLimit(1)
+                Spacer()
             } else {
                 ForEach(items.prefix(6)) { item in
                     HStack(spacing: 4.5) {

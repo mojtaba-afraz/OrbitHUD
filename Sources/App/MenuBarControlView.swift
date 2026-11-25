@@ -29,7 +29,7 @@ struct MenuBarControlView: View {
                 Spacer()
 
                 Button {
-                    Task { await viewModel.refreshNow() }
+                    Task { await viewModel.refreshNow(forceExternal: true) }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")

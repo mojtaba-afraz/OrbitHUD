@@ -139,7 +139,13 @@ public final class UsageViewModel: ObservableObject {
     private let codexFetcher = CodexQuotaFetcher()
     private let transcriptAggregator = TranscriptUsageAggregator()
     private var refreshTimer: Timer?
-    private var externalCache: [QuotaProviderID: (groups: [QuotaGroup], status: ProviderStatusInfo, nextAllowedAt: Date)] = [:]
+    private var activeTimerInterval: TimeInterval = 0
+    private var consecutiveAgyDisconnects: Int = 0
+    private var pendingRefresh: Bool = false
+    private var pendingForceExternal: Bool = false
+    private var watcherSources: [DispatchSourceFileSystemObject] = []
+    private var watcherDebounceWorkItem: DispatchWorkItem?
+    private var externalCache: [QuotaProviderID: (groups: [QuotaGroup], status: ProviderStatusInfo, nextAllowedAt: Date, credentialFingerprint: String?)] = [:]
 
     public init() {
         let savedMode = UserDefaults.standard.string(forKey: "displayMode_v3")
@@ -174,8 +180,17 @@ public final class UsageViewModel: ObservableObject {
         }
 
         restartTimer()
+        setupAuthAndDaemonWatchers()
         Task {
             await refreshNow()
+        }
+    }
+
+    deinit {
+        refreshTimer?.invalidate()
+        watcherDebounceWorkItem?.cancel()
+        for source in watcherSources {
+            source.cancel()
         }
     }
 
@@ -184,8 +199,17 @@ public final class UsageViewModel: ObservableObject {
     }
 
     public func restartTimer() {
+        scheduleTimer(interval: TimeInterval(refreshIntervalSeconds))
+    }
+
+    private func scheduleTimer(interval: TimeInterval) {
+        let clamped = max(interval, 2.0)
+        if refreshTimer != nil && abs(activeTimerInterval - clamped) < 0.1 {
+            return
+        }
         refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(refreshIntervalSeconds), repeats: true) { [weak self] _ in
+        activeTimerInterval = clamped
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: clamped, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
                 await self.refreshNow()
@@ -193,33 +217,115 @@ public final class UsageViewModel: ObservableObject {
         }
     }
 
-    public func refreshNow(forceExternal: Bool = false) async {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
+    private func updateAdaptivePollingInterval() {
+        let needsFastRecovery = enabledProviders.contains { pid in
+            guard let state = providerStatuses[pid]?.state else { return false }
+            return state == .authRequired || state == .disconnected
+        }
+        let targetInterval: TimeInterval = needsFastRecovery ? 3.0 : TimeInterval(refreshIntervalSeconds)
+        scheduleTimer(interval: targetInterval)
+    }
 
+    private func setupAuthAndDaemonWatchers() {
+        for source in watcherSources {
+            source.cancel()
+        }
+        watcherSources.removeAll()
+
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let watchDirs = [
+            home.appendingPathComponent(".gemini/antigravity/daemon"),
+            home.appendingPathComponent(".gemini/antigravity-ide/daemon"),
+            home.appendingPathComponent(".gemini/antigravity-cli/daemon"),
+            home.appendingPathComponent(".claude"),
+            home.appendingPathComponent(".codex")
+        ]
+
+        for dir in watchDirs {
+            guard FileManager.default.fileExists(atPath: dir.path) else { continue }
+            let fd = open(dir.path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd,
+                eventMask: [.write, .delete, .rename, .extend, .attrib],
+                queue: DispatchQueue.global(qos: .utility)
+            )
+            source.setEventHandler { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.scheduleDebouncedWatcherRefresh()
+                }
+            }
+            source.setCancelHandler {
+                close(fd)
+            }
+            source.resume()
+            watcherSources.append(source)
+        }
+    }
+
+    private func scheduleDebouncedWatcherRefresh() {
+        watcherDebounceWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.refreshNow(forceExternal: true)
+            }
+        }
+        watcherDebounceWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    public func refreshNow(forceExternal: Bool = false) async {
+        if isRefreshing {
+            pendingRefresh = true
+            pendingForceExternal = pendingForceExternal || forceExternal
+            return
+        }
+        isRefreshing = true
+
+        repeat {
+            let effectiveForceExternal = forceExternal || pendingForceExternal
+            pendingRefresh = false
+            pendingForceExternal = false
+
+            await performRefresh(forceExternal: effectiveForceExternal)
+        } while pendingRefresh
+
+        isRefreshing = false
+    }
+
+    private func performRefresh(forceExternal: Bool) async {
         let now = Date()
         let activeProviders = self.enabledProviders
 
-        let agyTask: Task<[QuotaGroup]?, Never> = Task {
+        let agyTask: Task<AntigravityQuotaFetchResult?, Never> = Task {
             guard activeProviders.contains(.antigravity) else { return nil }
-            return await self.quotaFetcher.fetchLiveQuotaGroups()
+            return await self.quotaFetcher.fetchLiveQuotaResult()
         }
 
-        let claudeTask: Task<ExternalProviderFetchResult?, Never> = Task {
+        let claudeTask: Task<(result: ExternalProviderFetchResult, fingerprint: String?, fromCache: Bool)?, Never> = Task {
             guard activeProviders.contains(.claudeCode) else { return nil }
-            if !forceExternal, let cached = await MainActor.run(body: { self.externalCache[.claudeCode] }), now < cached.nextAllowedAt {
-                return ExternalProviderFetchResult(groups: cached.groups, status: cached.status)
+            let currentFingerprint = self.claudeFetcher.credentialFingerprint()
+            let cached = await MainActor.run(body: { self.externalCache[.claudeCode] })
+            let credentialsChanged = cached != nil && cached?.credentialFingerprint != currentFingerprint
+            if !forceExternal && !credentialsChanged, let cached, now < cached.nextAllowedAt {
+                return (ExternalProviderFetchResult(groups: cached.groups, status: cached.status), currentFingerprint, true)
             }
-            return await self.claudeFetcher.fetchLiveQuota()
+            let res = await self.claudeFetcher.fetchLiveQuota()
+            return (res, currentFingerprint, false)
         }
 
-        let codexTask: Task<ExternalProviderFetchResult?, Never> = Task {
+        let codexTask: Task<(result: ExternalProviderFetchResult, fingerprint: String?, fromCache: Bool)?, Never> = Task {
             guard activeProviders.contains(.codex) else { return nil }
-            if !forceExternal, let cached = await MainActor.run(body: { self.externalCache[.codex] }), now < cached.nextAllowedAt {
-                return ExternalProviderFetchResult(groups: cached.groups, status: cached.status)
+            let currentFingerprint = self.codexFetcher.credentialFingerprint()
+            let cached = await MainActor.run(body: { self.externalCache[.codex] })
+            let credentialsChanged = cached != nil && cached?.credentialFingerprint != currentFingerprint
+            if !forceExternal && !credentialsChanged, let cached, now < cached.nextAllowedAt {
+                return (ExternalProviderFetchResult(groups: cached.groups, status: cached.status), currentFingerprint, true)
             }
-            return await self.codexFetcher.fetchLiveQuota()
+            let res = await self.codexFetcher.fetchLiveQuota()
+            return (res, currentFingerprint, false)
         }
 
         let aggregator = self.transcriptAggregator
@@ -227,46 +333,73 @@ public final class UsageViewModel: ObservableObject {
             aggregator.collectUsageSummary()
         }
 
-        let liveAgyGroups = await agyTask.value
-        let claudeRes = await claudeTask.value
-        let codexRes = await codexTask.value
+        let agyResult = await agyTask.value
+        let claudeOut = await claudeTask.value
+        let codexOut = await codexTask.value
         let tokenUsage = await tokenUsageTask.value
 
         var mergedGroups: [QuotaGroup] = []
         var newStatuses: [QuotaProviderID: ProviderStatusInfo] = [:]
         var agyConnected = false
 
-        if activeProviders.contains(.antigravity) {
-            if let liveAgyGroups, !liveAgyGroups.isEmpty {
+        if activeProviders.contains(.antigravity), let agyResult {
+            switch agyResult {
+            case .connected(let liveAgyGroups):
                 agyConnected = true
+                consecutiveAgyDisconnects = 0
                 mergedGroups.append(contentsOf: liveAgyGroups)
                 newStatuses[.antigravity] = ProviderStatusInfo(providerId: .antigravity, state: .connected)
-            } else {
-                let cachedAgy = self.snapshot.quotaGroups.filter { $0.providerId == QuotaProviderID.antigravity.rawValue }
-                mergedGroups.append(contentsOf: cachedAgy)
+
+            case .authRequired(let message):
+                // Immediately clear stale quota from previous account on logout
+                consecutiveAgyDisconnects = 0
+                newStatuses[.antigravity] = ProviderStatusInfo(
+                    providerId: .antigravity,
+                    state: .authRequired,
+                    message: message
+                )
+
+            case .disconnected(let message):
+                consecutiveAgyDisconnects += 1
+                // Keep previous groups only for a single transient disconnect (e.g. brief IDE restart)
+                if consecutiveAgyDisconnects <= 1 {
+                    let cachedAgy = self.snapshot.quotaGroups.filter { $0.providerId == QuotaProviderID.antigravity.rawValue }
+                    mergedGroups.append(contentsOf: cachedAgy)
+                }
                 newStatuses[.antigravity] = ProviderStatusInfo(
                     providerId: .antigravity,
                     state: .disconnected,
-                    message: "Waiting for Antigravity live quota..."
+                    message: message
                 )
             }
         }
 
-        for (pid, res) in [(QuotaProviderID.claudeCode, claudeRes), (QuotaProviderID.codex, codexRes)] {
-            guard activeProviders.contains(pid), let res else { continue }
+        for (pid, out) in [(QuotaProviderID.claudeCode, claudeOut), (QuotaProviderID.codex, codexOut)] {
+            guard activeProviders.contains(pid), let out else { continue }
+            let res = out.result
             var groupsToUse = res.groups
-            if res.status.state == .rateLimited, groupsToUse.isEmpty, let prev = externalCache[pid], !prev.groups.isEmpty {
-                groupsToUse = prev.groups
+            if !out.fromCache {
+                if res.status.state == .rateLimited, groupsToUse.isEmpty, let prev = externalCache[pid],
+                   prev.credentialFingerprint == out.fingerprint, !prev.groups.isEmpty {
+                    groupsToUse = prev.groups
+                }
+                let backoff = res.retryAfterSeconds > 0 ? res.retryAfterSeconds : pid.defaultPollInterval
+                externalCache[pid] = (groupsToUse, res.status, Date().addingTimeInterval(backoff), out.fingerprint)
             }
-            let backoff = res.retryAfterSeconds > 0 ? res.retryAfterSeconds : pid.defaultPollInterval
-            externalCache[pid] = (groupsToUse, res.status, Date().addingTimeInterval(backoff))
             newStatuses[pid] = res.status
             mergedGroups.append(contentsOf: groupsToUse)
         }
 
         let prevIds = self.snapshot.quotaGroups.map(\.id)
-        let prevStatusCount = self.visibleStatusCards.count
+        let prevStatusCards = self.visibleStatusCards
         self.providerStatuses = newStatuses
+
+        let statusMsg: String = {
+            if agyConnected { return "Live" }
+            if newStatuses[.antigravity]?.state == .authRequired { return "Not signed in" }
+            if newStatuses.values.contains(where: { $0.state == .connected }) { return "Synced" }
+            return "Disconnected"
+        }()
 
         let newSnapshot = AntigravityUsageSnapshot(
             timestamp: Date(),
@@ -274,13 +407,14 @@ public final class UsageViewModel: ObservableObject {
             quotaGroups: mergedGroups,
             modelQuotas: [],
             tokenUsage: tokenUsage,
-            statusMessage: agyConnected ? "Live" : "Synced"
+            statusMessage: statusMsg
         )
         self.snapshot = newSnapshot
-        if !mergedGroups.isEmpty {
-            SharedSnapshotStorage.save(newSnapshot)
-        }
-        if mergedGroups.map(\.id) != prevIds || self.visibleStatusCards.count != prevStatusCount {
+        SharedSnapshotStorage.save(newSnapshot)
+
+        updateAdaptivePollingInterval()
+
+        if mergedGroups.map(\.id) != prevIds || self.visibleStatusCards != prevStatusCards {
             onWindowConfigChanged?()
         }
     }

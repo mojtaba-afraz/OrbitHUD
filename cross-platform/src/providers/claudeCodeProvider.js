@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const https = require("node:https");
+const crypto = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 const { formatResetDuration, formatWindowLabel } = require("../quotaFetcher");
 const { utilizationToRemaining, makeProviderResult } = require("./types");
@@ -283,9 +284,20 @@ async function fetchClaudeCodeProvider() {
   }
 }
 
+function getClaudeCredentialFingerprint(platform = process.platform, homeDir = os.homedir()) {
+  const creds = discoverClaudeCredentials(platform, homeDir);
+  if (!creds?.accessToken) return null;
+  return crypto
+    .createHash("sha256")
+    .update(`claude:${creds.accessToken}`)
+    .digest("hex")
+    .slice(0, 24);
+}
+
 module.exports = {
   parseClaudeCredentialsJson,
   discoverClaudeCredentials,
+  getClaudeCredentialFingerprint,
   parseClaudeUsageResponse,
   fetchClaudeCodeProvider,
 };

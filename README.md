@@ -11,7 +11,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Release-v1.2.0-38BDF8?style=flat-square" alt="Release v1.2.0" />
+    <img src="https://img.shields.io/badge/Release-v1.2.1-38BDF8?style=flat-square" alt="Release v1.2.1" />
     <img src="https://img.shields.io/badge/Providers-Antigravity%20%7C%20Claude%20Code%20%7C%20Codex-E8926B?style=flat-square" alt="Providers" />
     <img src="https://img.shields.io/badge/License-MIT-3DDB94?style=flat-square" alt="MIT License" />
     <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-22D3EE?style=flat-square" alt="Platforms" />

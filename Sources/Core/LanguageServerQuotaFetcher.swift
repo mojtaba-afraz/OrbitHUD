@@ -10,11 +10,17 @@ public struct LanguageServerConnection: Codable, Equatable, Hashable {
     }
 }
 
+public enum AntigravityQuotaFetchResult: Equatable {
+    case connected([QuotaGroup])
+    case authRequired(message: String)
+    case disconnected(message: String)
+}
+
 public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
     private lazy var localSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 3.0
-        config.timeoutIntervalForResource = 4.0
+        config.timeoutIntervalForRequest = 1.2
+        config.timeoutIntervalForResource = 1.8
         config.connectionProxyDictionary = [:]
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
@@ -54,6 +60,10 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
     public static func loadCachedConnection() -> LanguageServerConnection? {
         guard let data = try? Data(contentsOf: cachedConnectionURL) else { return nil }
         return try? JSONDecoder().decode(LanguageServerConnection.self, from: data)
+    }
+
+    public static func clearCachedConnection() {
+        try? FileManager.default.removeItem(at: cachedConnectionURL)
     }
 
     /// Parses output of `ps auxeww` (which includes CLI flags and environment variables for user processes)
@@ -217,7 +227,54 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
         return parsedGroups.isEmpty ? nil : parsedGroups
     }
 
+    /// Classifies an HTTP response from `/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`.
+    public static func classifyQuotaResponse(statusCode: Int, data: Data) -> AntigravityQuotaFetchResult? {
+        if statusCode == 401 || statusCode == 403 {
+            return .authRequired(message: "Not signed in to Antigravity")
+        }
+
+        if let rawText = String(data: data, encoding: .utf8) {
+            let lower = rawText.lowercased()
+            if lower.contains("unauthenticated")
+                || lower.contains("not signed in")
+                || lower.contains("not logged in")
+                || lower.contains("logged out")
+                || lower.contains("no active user")
+                || lower.contains("login required") {
+                return .authRequired(message: "Not signed in to Antigravity")
+            }
+        }
+
+        guard (200...299).contains(statusCode) else {
+            return nil
+        }
+
+        if let groups = parseRetrieveUserQuotaSummaryJSON(data), !groups.isEmpty {
+            return .connected(groups)
+        }
+
+        // Valid JSON response with an explicit empty `groups: []` array indicates no active authenticated quota
+        if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let responseObj = (root["response"] as? [String: Any]) ?? root
+            if let rawGroups = responseObj["groups"] as? [[String: Any]], rawGroups.isEmpty {
+                return .authRequired(message: "Not signed in to Antigravity")
+            }
+            if root.isEmpty || responseObj.isEmpty {
+                return .authRequired(message: "Not signed in to Antigravity")
+            }
+        }
+
+        return nil
+    }
+
     public func fetchLiveQuotaGroups() async -> [QuotaGroup]? {
+        if case .connected(let groups) = await fetchLiveQuotaResult() {
+            return groups
+        }
+        return nil
+    }
+
+    public func fetchLiveQuotaResult() async -> AntigravityQuotaFetchResult {
         var candidates: [LanguageServerConnection] = []
 
         // 1. Check current environment variables if launched from Antigravity
@@ -229,7 +286,7 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
             candidates.append(LanguageServerConnection(port: port, csrfToken: token))
         }
 
-        // 2. Check Antigravity daemon discovery files (~/.gemini/antigravity/daemon/*.json)
+        // 2. Check Antigravity daemon discovery files (~/.gemini/antigravity/daemon/*.json), newest first
         for daemonConn in Self.discoverConnectionsFromDaemonFiles() {
             if !candidates.contains(daemonConn) {
                 candidates.append(daemonConn)
@@ -241,23 +298,52 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
             candidates.append(cached)
         }
 
-        // 4. Discover from `ps auxeww`
-        for discovered in discoverConnectionsFromPs() {
-            if !candidates.contains(discovered) {
-                candidates.append(discovered)
-            }
-        }
+        // 4. Try fast candidates first before spawning `ps`
+        var sawAuthRequired: AntigravityQuotaFetchResult? = nil
+        var tried: Set<LanguageServerConnection> = []
 
         for candidate in candidates {
-            for scheme in ["http", "https"] {
-                if let groups = await queryQuotaSummary(scheme: scheme, connection: candidate) {
-                    Self.saveCachedConnection(candidate)
-                    return groups
+            tried.insert(candidate)
+            for scheme in ["https", "http"] {
+                if let result = await queryQuotaSummaryResult(scheme: scheme, connection: candidate) {
+                    switch result {
+                    case .connected:
+                        Self.saveCachedConnection(candidate)
+                        return result
+                    case .authRequired:
+                        sawAuthRequired = result
+                    case .disconnected:
+                        break
+                    }
                 }
             }
         }
 
-        return nil
+        // 5. Fallback to `ps auxeww` discovery if fast candidates did not yield live quota
+        for discovered in discoverConnectionsFromPs() where !tried.contains(discovered) {
+            tried.insert(discovered)
+            for scheme in ["https", "http"] {
+                if let result = await queryQuotaSummaryResult(scheme: scheme, connection: discovered) {
+                    switch result {
+                    case .connected:
+                        Self.saveCachedConnection(discovered)
+                        return result
+                    case .authRequired:
+                        sawAuthRequired = result
+                    case .disconnected:
+                        break
+                    }
+                }
+            }
+        }
+
+        // Clear stale cached connection when no live quota was returned
+        Self.clearCachedConnection()
+
+        if let authResult = sawAuthRequired {
+            return authResult
+        }
+        return .disconnected(message: "Waiting for Antigravity live quota...")
     }
 
     public static func discoverConnectionsFromDaemonFiles() -> [LanguageServerConnection] {
@@ -269,10 +355,20 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
             home.appendingPathComponent(".gemini/antigravity-cli/daemon")
         ]
         for dir in dirs {
-            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey]
+            ) else {
                 continue
             }
-            for file in files where file.pathExtension == "json" {
+            let sortedFiles = files
+                .filter { $0.pathExtension == "json" }
+                .sorted { lhs, rhs in
+                    let lDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    let rDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    return lDate > rDate
+                }
+            for file in sortedFiles {
                 guard let data = try? Data(contentsOf: file),
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let token = (obj["csrfToken"] as? String) ?? (obj["csrf_token"] as? String),
@@ -306,7 +402,7 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
         return all
     }
 
-    private func queryQuotaSummary(scheme: String, connection: LanguageServerConnection, forceRefresh: Bool = true) async -> [QuotaGroup]? {
+    private func queryQuotaSummaryResult(scheme: String, connection: LanguageServerConnection, forceRefresh: Bool = true) async -> AntigravityQuotaFetchResult? {
         guard let url = URL(string: "\(scheme)://127.0.0.1:\(connection.port)/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary") else {
             return nil
         }
@@ -319,13 +415,16 @@ public final class LanguageServerQuotaFetcher: NSObject, URLSessionDelegate {
 
         do {
             let (data, response) = try await localSession.data(for: request)
-            guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else {
-                if forceRefresh {
-                    return await queryQuotaSummary(scheme: scheme, connection: connection, forceRefresh: false)
-                }
+            guard let httpResp = response as? HTTPURLResponse else {
                 return nil
             }
-            return Self.parseRetrieveUserQuotaSummaryJSON(data)
+            if let classified = Self.classifyQuotaResponse(statusCode: httpResp.statusCode, data: data) {
+                return classified
+            }
+            if forceRefresh && !(200...299).contains(httpResp.statusCode) {
+                return await queryQuotaSummaryResult(scheme: scheme, connection: connection, forceRefresh: false)
+            }
+            return nil
         } catch {
             return nil
         }

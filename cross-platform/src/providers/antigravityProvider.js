@@ -1,15 +1,23 @@
 "use strict";
 
-const { fetchLiveQuotaSummary } = require("../quotaFetcher");
+const { fetchLiveQuotaStatus } = require("../quotaFetcher");
 const { makeProviderResult } = require("./types");
 
 async function fetchAntigravityProvider(options = {}) {
   const forceRefresh = options.forceRefresh !== false;
-  const live = await fetchLiveQuotaSummary(forceRefresh);
-  if (!live || !Array.isArray(live.groups) || live.groups.length === 0) {
+  const live = await fetchLiveQuotaStatus(forceRefresh);
+
+  if (live?.status === "auth_required") {
+    return makeProviderResult("antigravity", {
+      status: "auth_required",
+      message: live.message || "Not signed in to Antigravity",
+    });
+  }
+
+  if (!live || live.status !== "connected" || !Array.isArray(live.groups) || live.groups.length === 0) {
     return makeProviderResult("antigravity", {
       status: "disconnected",
-      message: "Waiting for Antigravity live quota...",
+      message: live?.message || "Waiting for Antigravity live quota...",
     });
   }
 

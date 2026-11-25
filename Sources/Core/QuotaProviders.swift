@@ -1,5 +1,11 @@
 import Foundation
 import Security
+import CryptoKit
+
+private func sha256Fingerprint(_ raw: String) -> String {
+    let digest = SHA256.hash(data: Data(raw.utf8))
+    return digest.prefix(12).map { String(format: "%02x", $0) }.joined()
+}
 
 public enum QuotaProviderID: String, CaseIterable, Codable, Identifiable, Hashable {
     case antigravity = "antigravity"
@@ -158,6 +164,11 @@ public final class ClaudeCodeQuotaFetcher {
                 )
             )
         }
+    }
+
+    public func credentialFingerprint() -> String? {
+        guard let token = discoverAccessToken() else { return nil }
+        return sha256Fingerprint("claude:\(token)")
     }
 
     public func discoverAccessToken() -> String? {
@@ -375,6 +386,11 @@ public final class CodexQuotaFetcher {
                 )
             )
         }
+    }
+
+    public func credentialFingerprint() -> String? {
+        guard let creds = discoverCredentials() else { return nil }
+        return sha256Fingerprint("codex:\(creds.accountId ?? ""):\(creds.accessToken)")
     }
 
     public func discoverCredentials() -> (accessToken: String, accountId: String?)? {

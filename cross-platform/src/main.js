@@ -15,6 +15,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const { ProviderManager } = require("./providers/providerManager");
 const { PROVIDER_META, PROVIDER_ORDER } = require("./providers/types");
+const { getCandidateDaemonDirs } = require("./quotaFetcher");
 const {
   checkForUpdate,
   downloadFileWithProgress,
@@ -26,7 +27,14 @@ const providerManager = new ProviderManager();
 let widgetWindow = null;
 let tray = null;
 let refreshTimer = null;
+let activeRefreshIntervalMs = 0;
 let updateCheckTimer = null;
+let isRefreshingQuota = false;
+let pendingQuotaRefresh = false;
+let pendingQuotaForce = false;
+let consecutiveAgyDisconnects = 0;
+const fsWatchers = [];
+let watcherDebounceTimer = null;
 
 let updateState = {
   status: "idle", // "idle" | "checking" | "available" | "downloading" | "installing" | "error"
@@ -471,36 +479,132 @@ async function startAutoUpdateDownload() {
   }
 }
 
-async function refreshQuota(force = false) {
-  const prevCount = state.lastQuotaData?.groups?.length || 0;
-  const merged = await providerManager.refresh(state.enabledProviders, { force });
-  if (merged) {
-    // Preserve last known Antigravity groups if temporarily disconnected during IDE restart
-    if (
-      state.enabledProviders.includes("antigravity") &&
-      merged.providerStatuses?.antigravity?.status === "disconnected" &&
-      !merged.groups.some((g) => (g.providerId || "antigravity") === "antigravity") &&
-      state.lastQuotaData?.groups?.some((g) => (g.providerId || "antigravity") === "antigravity")
-    ) {
-      const prevAgyGroups = state.lastQuotaData.groups.filter(
-        (g) => (g.providerId || "antigravity") === "antigravity"
-      );
-      const prevAgyRings = (state.lastQuotaData.ringItems || []).filter(
-        (it) => (it.providerId || "antigravity") === "antigravity"
-      );
-      merged.groups = [...prevAgyGroups, ...merged.groups];
-      merged.ringItems = [...prevAgyRings, ...merged.ringItems];
-    }
-
-    state.lastQuotaData = merged;
-    if ((merged.groups?.length || 0) !== prevCount) {
-      measuredBentoHeight = null;
-      applyWindowMode();
-    }
-    saveState();
+function scheduleRefreshTimer(intervalMs) {
+  const clamped = Math.max(intervalMs, 2000);
+  if (refreshTimer && activeRefreshIntervalMs === clamped) {
+    return;
   }
-  sendStateToRenderer();
-  updateTrayMenu();
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+  }
+  activeRefreshIntervalMs = clamped;
+  refreshTimer = setInterval(() => {
+    refreshQuota(false);
+  }, clamped);
+}
+
+function updateAdaptivePolling(providerStatuses) {
+  const statuses = providerStatuses || {};
+  const needsFastRecovery = (state.enabledProviders || ["antigravity"]).some((pid) => {
+    const st = statuses[pid]?.status;
+    return st === "auth_required" || st === "disconnected";
+  });
+  scheduleRefreshTimer(needsFastRecovery ? 3000 : 20000);
+}
+
+function setupAuthAndDaemonWatchers() {
+  for (const w of fsWatchers) {
+    try {
+      w.close();
+    } catch {
+      // ignore
+    }
+  }
+  fsWatchers.length = 0;
+
+  const home = os.homedir();
+  const watchDirs = new Set([
+    ...getCandidateDaemonDirs(home),
+    path.join(home, ".claude"),
+    process.env.CODEX_HOME || path.join(home, ".codex"),
+  ]);
+
+  const triggerDebouncedRefresh = () => {
+    if (watcherDebounceTimer) {
+      clearTimeout(watcherDebounceTimer);
+    }
+    watcherDebounceTimer = setTimeout(() => {
+      watcherDebounceTimer = null;
+      refreshQuota(true);
+    }, 300);
+  };
+
+  for (const dir of watchDirs) {
+    try {
+      if (!fs.existsSync(dir)) continue;
+      const watcher = fs.watch(dir, { persistent: false }, () => {
+        triggerDebouncedRefresh();
+      });
+      watcher.on("error", () => {});
+      fsWatchers.push(watcher);
+    } catch {
+      // ignore unwatched dirs
+    }
+  }
+}
+
+async function refreshQuota(force = false) {
+  if (isRefreshingQuota) {
+    pendingQuotaRefresh = true;
+    pendingQuotaForce = pendingQuotaForce || Boolean(force);
+    return;
+  }
+  isRefreshingQuota = true;
+
+  try {
+    let nextForce = Boolean(force);
+    do {
+      pendingQuotaRefresh = false;
+      pendingQuotaForce = false;
+
+      const prevCount = state.lastQuotaData?.groups?.length || 0;
+      const prevStatusKey = JSON.stringify(state.lastQuotaData?.providerStatuses || {});
+      const merged = await providerManager.refresh(state.enabledProviders, { force: nextForce });
+      if (merged) {
+        const agyStatus = merged.providerStatuses?.antigravity?.status;
+        if (state.enabledProviders.includes("antigravity")) {
+          if (agyStatus === "connected") {
+            consecutiveAgyDisconnects = 0;
+          } else if (agyStatus === "auth_required") {
+            // Immediately clear previous account's Antigravity groups on logout
+            consecutiveAgyDisconnects = 0;
+          } else if (agyStatus === "disconnected") {
+            consecutiveAgyDisconnects += 1;
+            // Preserve last known Antigravity groups only for 1 transient cycle (brief IDE restart)
+            if (
+              consecutiveAgyDisconnects <= 1 &&
+              !merged.groups.some((g) => (g.providerId || "antigravity") === "antigravity") &&
+              state.lastQuotaData?.groups?.some((g) => (g.providerId || "antigravity") === "antigravity")
+            ) {
+              const prevAgyGroups = state.lastQuotaData.groups.filter(
+                (g) => (g.providerId || "antigravity") === "antigravity"
+              );
+              const prevAgyRings = (state.lastQuotaData.ringItems || []).filter(
+                (it) => (it.providerId || "antigravity") === "antigravity"
+              );
+              merged.groups = [...prevAgyGroups, ...merged.groups];
+              merged.ringItems = [...prevAgyRings, ...merged.ringItems];
+            }
+          }
+        }
+
+        state.lastQuotaData = merged;
+        const newStatusKey = JSON.stringify(merged.providerStatuses || {});
+        if ((merged.groups?.length || 0) !== prevCount || newStatusKey !== prevStatusKey) {
+          measuredBentoHeight = null;
+          applyWindowMode();
+        }
+        saveState();
+        updateAdaptivePolling(merged.providerStatuses);
+      }
+      sendStateToRenderer();
+      updateTrayMenu();
+
+      nextForce = pendingQuotaForce;
+    } while (pendingQuotaRefresh);
+  } finally {
+    isRefreshingQuota = false;
+  }
 }
 
 function buildControlMenuTemplate() {
@@ -784,7 +888,8 @@ app.whenReady().then(() => {
   }
   createTrayIcon();
   createWidgetWindow();
-  refreshTimer = setInterval(refreshQuota, 20000);
+  setupAuthAndDaemonWatchers();
+  scheduleRefreshTimer(20000);
   setTimeout(() => runUpdateCheck(false), 5000);
   updateCheckTimer = setInterval(
     () => runUpdateCheck(false),

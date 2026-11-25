@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const https = require("node:https");
+const crypto = require("node:crypto");
 const { formatResetDuration, formatWindowLabel } = require("../quotaFetcher");
 const { utilizationToRemaining, makeProviderResult } = require("./types");
 
@@ -258,9 +259,20 @@ async function fetchCodexProvider() {
   }
 }
 
+function getCodexCredentialFingerprint(homeDir = os.homedir()) {
+  const creds = discoverCodexCredentials(homeDir);
+  if (!creds?.accessToken) return null;
+  return crypto
+    .createHash("sha256")
+    .update(`codex:${creds.accountId || ""}:${creds.accessToken}`)
+    .digest("hex")
+    .slice(0, 24);
+}
+
 module.exports = {
   parseCodexCredentialsJson,
   discoverCodexCredentials,
+  getCodexCredentialFingerprint,
   parseCodexUsageResponse,
   fetchCodexProvider,
 };

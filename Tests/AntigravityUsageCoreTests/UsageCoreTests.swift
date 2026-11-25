@@ -20,4 +20,29 @@ final class UsageCoreTests: XCTestCase {
         XCTAssertEqual(groups?[2].displayName, "Gemini 4 Argon")
         XCTAssertEqual(groups?[2].buckets[0].remainingPercentage, 93)
     }
+
+    func testClassifyQuotaResponseAuthRequired() {
+        let emptyGroups = Data(#"{"response":{"groups":[]}}"#.utf8)
+        XCTAssertEqual(
+            LanguageServerQuotaFetcher.classifyQuotaResponse(statusCode: 200, data: emptyGroups),
+            .authRequired(message: "Not signed in to Antigravity")
+        )
+
+        let unauthBody = Data(#"{"code":"UNAUTHENTICATED","message":"User is not signed in"}"#.utf8)
+        XCTAssertEqual(
+            LanguageServerQuotaFetcher.classifyQuotaResponse(statusCode: 200, data: unauthBody),
+            .authRequired(message: "Not signed in to Antigravity")
+        )
+
+        let http401 = Data("{}".utf8)
+        XCTAssertEqual(
+            LanguageServerQuotaFetcher.classifyQuotaResponse(statusCode: 401, data: http401),
+            .authRequired(message: "Not signed in to Antigravity")
+        )
+
+        let serverErr = Data(#"{"error":"internal"}"#.utf8)
+        XCTAssertNil(
+            LanguageServerQuotaFetcher.classifyQuotaResponse(statusCode: 500, data: serverErr)
+        )
+    }
 }

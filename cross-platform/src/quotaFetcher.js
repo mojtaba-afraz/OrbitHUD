@@ -55,6 +55,14 @@ function loadCachedConnection() {
   return null;
 }
 
+function clearCachedConnection() {
+  try {
+    fs.unlinkSync(getCacheFilePath());
+  } catch {
+    // ignore
+  }
+}
+
 /**
  * Extracts candidate ports from a daemon discovery JSON object (`hub_<port>.json` or `ls_<id>.json`).
  */
@@ -711,6 +719,52 @@ function parseQuotaSummaryResponse(rawJson, nowMs = Date.now()) {
   };
 }
 
+function classifyQuotaHttpResponse(statusCode, body) {
+  if (statusCode === 401 || statusCode === 403) {
+    return { status: "auth_required", message: "Not signed in to Antigravity" };
+  }
+
+  if (typeof body === "string" && body.length > 0) {
+    const lower = body.toLowerCase();
+    if (
+      lower.includes("unauthenticated") ||
+      lower.includes("not signed in") ||
+      lower.includes("not logged in") ||
+      lower.includes("logged out") ||
+      lower.includes("no active user") ||
+      lower.includes("login required")
+    ) {
+      return { status: "auth_required", message: "Not signed in to Antigravity" };
+    }
+  }
+
+  if (statusCode < 200 || statusCode >= 300) {
+    return null;
+  }
+
+  try {
+    const parsed = parseQuotaSummaryResponse(body);
+    if (parsed && Array.isArray(parsed.groups) && parsed.groups.length > 0) {
+      return { status: "connected", ...parsed };
+    }
+    const root = typeof body === "string" ? JSON.parse(body) : body;
+    if (root && typeof root === "object") {
+      const responseObj = root.response || root;
+      if (
+        (Array.isArray(responseObj.groups) && responseObj.groups.length === 0) ||
+        Object.keys(root).length === 0 ||
+        Object.keys(responseObj).length === 0
+      ) {
+        return { status: "auth_required", message: "Not signed in to Antigravity" };
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  return null;
+}
+
 function requestQuotaSummary(scheme, port, csrfToken, forceRefresh = true) {
   return new Promise((resolve) => {
     const client = scheme === "https" ? https : http;
@@ -727,25 +781,16 @@ function requestQuotaSummary(scheme, port, csrfToken, forceRefresh = true) {
           "x-codeium-csrf-token": csrfToken,
         },
         rejectUnauthorized: false,
-        timeout: 4500,
+        timeout: 1500,
       },
       (res) => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          res.resume();
-          resolve(null);
-          return;
-        }
         let body = "";
         res.setEncoding("utf8");
         res.on("data", (chunk) => {
           body += chunk;
         });
         res.on("end", () => {
-          try {
-            resolve(parseQuotaSummaryResponse(body));
-          } catch {
-            resolve(null);
-          }
+          resolve(classifyQuotaHttpResponse(res.statusCode || 0, body));
         });
       }
     );
@@ -769,8 +814,9 @@ async function fetchQuotaWithFallback(scheme, port, csrfToken, forceRefresh = tr
   return null;
 }
 
-async function fetchLiveQuotaSummary(forceRefresh = true) {
+async function fetchLiveQuotaStatus(forceRefresh = true) {
   const tried = new Set();
+  let sawAuthRequired = null;
 
   // 1. Try fast candidates first (env, daemon/*.json, cached connection) without spawning ps/powershell
   for (const candidate of discoverFastConnections()) {
@@ -778,9 +824,12 @@ async function fetchLiveQuotaSummary(forceRefresh = true) {
     tried.add(key);
     for (const scheme of ["https", "http"]) {
       const result = await fetchQuotaWithFallback(scheme, candidate.port, candidate.csrfToken, forceRefresh);
-      if (result) {
+      if (result?.status === "connected") {
         saveCachedConnection(candidate);
         return result;
+      }
+      if (result?.status === "auth_required") {
+        sawAuthRequired = result;
       }
     }
   }
@@ -792,22 +841,39 @@ async function fetchLiveQuotaSummary(forceRefresh = true) {
     tried.add(key);
     for (const scheme of ["https", "http"]) {
       const result = await fetchQuotaWithFallback(scheme, candidate.port, candidate.csrfToken, forceRefresh);
-      if (result) {
+      if (result?.status === "connected") {
         saveCachedConnection(candidate);
         return result;
       }
+      if (result?.status === "auth_required") {
+        sawAuthRequired = result;
+      }
     }
   }
-  return null;
+
+  clearCachedConnection();
+
+  if (sawAuthRequired) {
+    return sawAuthRequired;
+  }
+  return { status: "disconnected", message: "Waiting for Antigravity live quota..." };
+}
+
+async function fetchLiveQuotaSummary(forceRefresh = true) {
+  const res = await fetchLiveQuotaStatus(forceRefresh);
+  return res?.status === "connected" ? res : null;
 }
 
 module.exports = {
   parseDiscoveryJsonObject,
   discoverFromDaemonFiles,
+  getCandidateDaemonDirs,
   parseConnectionsFromText,
   formatResetDuration,
   formatWindowLabel,
   parseQuotaSummaryResponse,
+  classifyQuotaHttpResponse,
   discoverConnections,
+  fetchLiveQuotaStatus,
   fetchLiveQuotaSummary,
 };

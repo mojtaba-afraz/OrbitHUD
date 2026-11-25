@@ -2,13 +2,24 @@
 
 const { PROVIDER_META, PROVIDER_ORDER } = require("./types");
 const { fetchAntigravityProvider } = require("./antigravityProvider");
-const { fetchClaudeCodeProvider } = require("./claudeCodeProvider");
-const { fetchCodexProvider } = require("./codexProvider");
+const {
+  fetchClaudeCodeProvider,
+  getClaudeCredentialFingerprint,
+} = require("./claudeCodeProvider");
+const {
+  fetchCodexProvider,
+  getCodexCredentialFingerprint,
+} = require("./codexProvider");
 
 const FETCHERS = {
   antigravity: fetchAntigravityProvider,
   "claude-code": fetchClaudeCodeProvider,
   codex: fetchCodexProvider,
+};
+
+const FINGERPRINT_GETTERS = {
+  "claude-code": getClaudeCredentialFingerprint,
+  codex: getCodexCredentialFingerprint,
 };
 
 function mergeProviderResults(resultsById, enabledProviders, nowMs = Date.now()) {
@@ -45,9 +56,10 @@ function mergeProviderResults(resultsById, enabledProviders, nowMs = Date.now())
 }
 
 class ProviderManager {
-  constructor(customFetchers = null) {
+  constructor(customFetchers = null, customFingerprintGetters = null) {
     this.fetchers = customFetchers || FETCHERS;
-    this.cache = new Map(); // providerId -> { result, nextAllowedAt }
+    this.fingerprintGetters = customFingerprintGetters || FINGERPRINT_GETTERS;
+    this.cache = new Map(); // providerId -> { result, nextAllowedAt, credentialFingerprint }
   }
 
   async refresh(enabledProviders = ["antigravity"], options = {}) {
@@ -62,17 +74,36 @@ class ProviderManager {
 
         const cached = this.cache.get(id);
         const pollMs = PROVIDER_META[id]?.defaultPollMs || 60_000;
-        if (!force && cached && now < cached.nextAllowedAt) {
+        const isLocal = Boolean(PROVIDER_META[id]?.isLocal);
+        const fpGetter = this.fingerprintGetters[id];
+        const currentFingerprint = typeof fpGetter === "function" ? fpGetter() : undefined;
+        const credentialsChanged =
+          Boolean(cached) &&
+          currentFingerprint !== undefined &&
+          cached.credentialFingerprint !== currentFingerprint;
+
+        const recoveringLocal =
+          isLocal &&
+          cached &&
+          (cached.result?.status === "auth_required" || cached.result?.status === "disconnected");
+
+        if (!force && !credentialsChanged && !recoveringLocal && cached && now < cached.nextAllowedAt) {
           return;
         }
 
-        const result = await fetcher({ forceRefresh: force });
+        const result = await fetcher({ forceRefresh: force || credentialsChanged || isLocal });
         const backoffMs =
-          result.retryAfterMs && result.retryAfterMs > 0 ? result.retryAfterMs : pollMs;
+          result.retryAfterMs && result.retryAfterMs > 0
+            ? result.retryAfterMs
+            : isLocal && (result.status === "auth_required" || result.status === "disconnected")
+            ? 0
+            : pollMs;
 
-        // Preserve last known groups if an external provider is temporarily rate-limited
+        // Preserve last known groups only if an external provider is temporarily rate-limited for the same account
         const mergedResult =
-          result.status === "rate_limited" && cached?.result?.groups?.length > 0
+          result.status === "rate_limited" &&
+          !credentialsChanged &&
+          cached?.result?.groups?.length > 0
             ? {
                 ...cached.result,
                 status: "rate_limited",
@@ -84,6 +115,7 @@ class ProviderManager {
         this.cache.set(id, {
           result: mergedResult,
           nextAllowedAt: Date.now() + backoffMs,
+          credentialFingerprint: currentFingerprint,
         });
       })
     );

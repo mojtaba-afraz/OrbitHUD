@@ -6,6 +6,7 @@ const {
   parseConnectionsFromText,
   formatResetDuration,
   parseQuotaSummaryResponse,
+  classifyQuotaHttpResponse,
 } = require("../src/quotaFetcher");
 const {
   compareSemver,
@@ -19,7 +20,7 @@ const {
   parseCodexCredentialsJson,
   parseCodexUsageResponse,
 } = require("../src/providers/codexProvider");
-const { mergeProviderResults } = require("../src/providers/providerManager");
+const { ProviderManager, mergeProviderResults } = require("../src/providers/providerManager");
 
 console.log("Running Cross-Platform Antigravity Usage Widget tests...");
 
@@ -321,4 +322,79 @@ assert.equal(mergedMulti.providerStatuses["claude-code"].shortName, "CC");
 assert.equal(mergedMulti.providerStatuses.codex.shortName, "CDX");
 console.log("  ✓ Multi-Provider adapters (Claude Code, Codex CLI) & ProviderManager passed");
 
-console.log("✅ All cross-platform tests passed!");
+// 6. Test Antigravity auth_required vs connected classification
+assert.equal(classifyQuotaHttpResponse(401, "{}").status, "auth_required");
+assert.equal(classifyQuotaHttpResponse(403, "{}").status, "auth_required");
+assert.equal(classifyQuotaHttpResponse(200, '{"response":{"groups":[]}}').status, "auth_required");
+assert.equal(
+  classifyQuotaHttpResponse(200, '{"code":"UNAUTHENTICATED","message":"not signed in"}').status,
+  "auth_required"
+);
+assert.equal(classifyQuotaHttpResponse(500, '{"error":"boom"}'), null);
+assert.equal(
+  classifyQuotaHttpResponse(200, JSON.stringify(sampleQuotaResponse)).status,
+  "connected"
+);
+console.log("  ✓ Antigravity auth_required vs connected classification passed");
+
+// 7. Test ProviderManager immediate cache invalidation on logout & account switch
+(async () => {
+  let currentFp = "acct-A-fp";
+  let fetchCount = 0;
+
+  const pm = new ProviderManager(
+    {
+      codex: async () => {
+        fetchCount += 1;
+        if (!currentFp) {
+          return {
+            providerId: "codex",
+            status: "auth_required",
+            message: 'Not signed in — run "codex login"',
+            groups: [],
+            ringItems: [],
+          };
+        }
+        return {
+          providerId: "codex",
+          status: "connected",
+          groups: [{ id: `codex::${currentFp}`, providerId: "codex", displayName: currentFp, buckets: [] }],
+          ringItems: [],
+        };
+      },
+    },
+    {
+      codex: () => currentFp,
+    }
+  );
+
+  // Initial fetch for Account A
+  const res1 = await pm.refresh(["codex"]);
+  assert.equal(fetchCount, 1);
+  assert.equal(res1.groups[0].id, "codex::acct-A-fp");
+
+  // Cached hit while still on Account A
+  const res2 = await pm.refresh(["codex"]);
+  assert.equal(fetchCount, 1);
+  assert.equal(res2.groups[0].id, "codex::acct-A-fp");
+
+  // Logout (fingerprint becomes null) -> must immediately bypass 90s cache & clear groups
+  currentFp = null;
+  const res3 = await pm.refresh(["codex"]);
+  assert.equal(fetchCount, 2);
+  assert.equal(res3.groups.length, 0);
+  assert.equal(res3.providerStatuses.codex.status, "auth_required");
+
+  // Login to Account B -> must immediately bypass backoff & load Account B
+  currentFp = "acct-B-fp";
+  const res4 = await pm.refresh(["codex"]);
+  assert.equal(fetchCount, 3);
+  assert.equal(res4.groups[0].id, "codex::acct-B-fp");
+  assert.equal(res4.providerStatuses.codex.status, "connected");
+
+  console.log("  ✓ ProviderManager instant logout & account-switch cache invalidation passed");
+  console.log("✅ All cross-platform tests passed!");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
