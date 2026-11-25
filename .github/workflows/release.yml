@@ -129,6 +129,12 @@ jobs:
           tag_name: ${{ github.ref_name != 'main' && github.ref_name != 'master' && github.ref_name || inputs.tag_name || 'v1.0.0' }}
           name: "OrbitHUD ${{ github.ref_name != 'main' && github.ref_name != 'master' && github.ref_name || inputs.tag_name || 'v1.0.0' }}"
           generate_release_notes: true
+          body: |
+            > **macOS First Launch Note:** OrbitHUD is an open-source, ad-hoc signed app (no paid Apple Developer ID). If macOS says *"Apple could not verify OrbitHUD.app"*, open **System Settings → Privacy & Security → Open Anyway**, or run:
+            > ```bash
+            > xattr -dr com.apple.quarantine /Applications/OrbitHUD.app
+            > ```
+            > Or install cleanly via terminal: `curl -fsSL https://raw.githubusercontent.com/mojtaba-afraz/OrbitHUD/main/scripts/install.sh | bash`
           files: |
             release-assets/OrbitHUD-macOS.dmg
             release-assets/OrbitHUD-macOS.zip

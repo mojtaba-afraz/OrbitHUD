@@ -11,13 +11,29 @@ APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 echo "==> Building $APP_NAME (Release)..."
 mkdir -p "$BUILD_DIR" /tmp/swift-module-cache
 BIN_PATH="$BUILD_DIR/$APP_NAME-bin"
+ARM64_BIN="$BUILD_DIR/$APP_NAME-arm64"
+X86_64_BIN="$BUILD_DIR/$APP_NAME-x86_64"
 
 swiftc -O \
     -module-cache-path /tmp/swift-module-cache \
     -target arm64-apple-macosx13.0 \
     Sources/Core/*.swift \
     Sources/App/*.swift \
-    -o "$BIN_PATH"
+    -o "$ARM64_BIN"
+
+if swiftc -O \
+    -module-cache-path /tmp/swift-module-cache \
+    -target x86_64-apple-macosx13.0 \
+    Sources/Core/*.swift \
+    Sources/App/*.swift \
+    -o "$X86_64_BIN" 2>/dev/null; then
+    echo "==> Creating Universal binary (arm64 + x86_64)..."
+    lipo -create -output "$BIN_PATH" "$ARM64_BIN" "$X86_64_BIN"
+    rm -f "$ARM64_BIN" "$X86_64_BIN"
+else
+    echo "ℹ x86_64 cross-compile unavailable; using arm64 binary."
+    mv "$ARM64_BIN" "$BIN_PATH"
+fi
 
 echo "==> Creating macOS Application Bundle at $APP_BUNDLE..."
 rm -rf "$APP_BUNDLE" "$BUILD_DIR/AntigravityUsageWidget.app"
@@ -69,8 +85,13 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "==> Signing $APP_BUNDLE (ad-hoc local signature)..."
-codesign --force --deep --sign - "$APP_BUNDLE"
+if [ -n "${APPLE_SIGN_IDENTITY:-}" ]; then
+    echo "==> Signing $APP_BUNDLE with Developer ID ($APPLE_SIGN_IDENTITY)..."
+    codesign --force --deep --options runtime --timestamp --sign "$APPLE_SIGN_IDENTITY" "$APP_BUNDLE"
+else
+    echo "==> Signing $APP_BUNDLE (ad-hoc local signature)..."
+    codesign --force --deep --sign - "$APP_BUNDLE"
+fi
 
 echo "✅ Done! Application bundle created at:"
 echo "   $APP_BUNDLE"

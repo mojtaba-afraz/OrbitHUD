@@ -16,6 +16,12 @@ cask "orbithud" do
 
   app "OrbitHUD.app"
 
+  caveats <<~EOS
+    OrbitHUD is ad-hoc signed (no paid Apple Developer ID certificate).
+    If macOS Gatekeeper blocks first launch, install with `--no-quarantine` or run:
+      xattr -dr com.apple.quarantine /Applications/OrbitHUD.app
+  EOS
+
   zap trash: [
     "~/.gemini/antigravity-usage-widget",
     "~/Library/Preferences/com.orbithud.antigravity.plist",

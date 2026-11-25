@@ -38,16 +38,21 @@ Download the ready-to-use installer for your operating system from the [**Latest
 
 | Operating System | Direct Download | Installation |
 | :--- | :--- | :--- |
-| **🍎 macOS** *(Apple Silicon & Intel)* | [**`OrbitHUD-macOS.dmg`**](../../releases/latest/download/OrbitHUD-macOS.dmg) / [**`OrbitHUD-macOS.zip`**](../../releases/latest/download/OrbitHUD-macOS.zip) | Open `.dmg` or extract `.zip`, drag to **Applications**, and launch |
+| **🍎 macOS** *(Apple Silicon & Intel)* | [**`OrbitHUD-macOS.dmg`**](../../releases/latest/download/OrbitHUD-macOS.dmg) / [**`OrbitHUD-macOS.zip`**](../../releases/latest/download/OrbitHUD-macOS.zip) | Open `.dmg` or extract `.zip`, drag to **Applications**, and launch *(see macOS note below)* |
 | **🪟 Windows** *(10 / 11 x64)* | [**`OrbitHUD-Windows-Setup.exe`**](../../releases/latest/download/OrbitHUD-Windows-Setup.exe) / [**`Portable.exe`**](../../releases/latest/download/OrbitHUD-Windows-Portable.exe) | Double-click `.exe` to install & launch in System Tray |
 | **🐧 Linux** *(Ubuntu / Debian / Arch / Fedora)* | [**`OrbitHUD-Linux-x86_64.AppImage`**](../../releases/latest/download/OrbitHUD-Linux-x86_64.AppImage) / [**`OrbitHUD-Linux-amd64.deb`**](../../releases/latest/download/OrbitHUD-Linux-amd64.deb) | Run `.AppImage` directly or install via `sudo dpkg -i OrbitHUD-Linux-amd64.deb` |
+
+> [!NOTE]
+> **macOS First Launch ("Apple could not verify OrbitHUD.app"):** OrbitHUD is an open-source, ad-hoc signed app without a paid Apple Developer ID certificate. If macOS Gatekeeper blocks the first launch:
+> - **Option A (System Settings):** Click **Done**, open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to OrbitHUD.
+> - **Option B (Terminal):** Run `xattr -dr com.apple.quarantine /Applications/OrbitHUD.app` — or install directly using the one-command terminal installer or Homebrew `--no-quarantine` below.
 
 ### 📦 Package Managers (Homebrew, WinGet, AUR)
 
 **macOS (Homebrew Cask):**
 ```bash
 brew tap mojtaba-afraz/tap
-brew install --cask orbithud
+brew install --cask --no-quarantine orbithud
 ```
 
 **Windows (WinGet):**
