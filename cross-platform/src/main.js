@@ -577,7 +577,14 @@ async function startAutoUpdateDownload() {
       pid: process.pid,
     });
     if (result && result.relaunching) {
-      setTimeout(() => app.quit(), 250);
+      setTimeout(() => {
+        app.quit();
+        // Safety fallback so Windows file handles are always released for the updater
+        const forceExitTimer = setTimeout(() => app.exit(0), 1500);
+        if (forceExitTimer && typeof forceExitTimer.unref === "function") {
+          forceExitTimer.unref();
+        }
+      }, 250);
     } else if (result && result.openPath) {
       await shell.openPath(result.openPath);
     } else if (updateState.releaseUrl) {
@@ -1017,6 +1024,37 @@ app.whenReady().then(() => {
     () => runUpdateCheck(false),
     4 * 60 * 60 * 1000
   );
+});
+
+app.on("before-quit", () => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  if (updateCheckTimer) {
+    clearInterval(updateCheckTimer);
+    updateCheckTimer = null;
+  }
+  if (watcherDebounceTimer) {
+    clearTimeout(watcherDebounceTimer);
+    watcherDebounceTimer = null;
+  }
+  for (const w of fsWatchers) {
+    try {
+      w.close();
+    } catch {
+      // ignore
+    }
+  }
+  fsWatchers.length = 0;
+  if (tray && !tray.isDestroyed()) {
+    try {
+      tray.destroy();
+    } catch {
+      // ignore
+    }
+    tray = null;
+  }
 });
 
 app.on("window-all-closed", (e) => {

@@ -396,81 +396,80 @@ function downloadFileWithProgress(url, destPath, onProgress, maxRedirects = 6) {
 }
 
 /**
- * Builds a Windows batch script that waits for the exiting OrbitHUD PID,
- * swaps the portable executable (with retry), and relaunches OrbitHUD.
- * Uses `ping` instead of `timeout /t` because `timeout` fails when stdin is ignored.
+ * Escapes a string for use inside a single-quoted PowerShell literal (`'...'`).
+ * Single-quoted strings in PowerShell do not expand `$variables` or backticks;
+ * only `'` itself must be doubled.
+ */
+function escapePowerShellSingleQuoted(value) {
+  return String(value ?? "").replace(/'/g, "''");
+}
+
+/**
+ * Builds a headless Windows PowerShell script that waits for the exiting OrbitHUD PID
+ * using native `Wait-Process` (no cmd.exe / tasklist / find / ping child consoles),
+ * swaps the portable executable with retry, and relaunches OrbitHUD.
  */
 function buildWindowsPortableUpdateScript({ downloadedPath, portableTarget, pid }) {
   const safePid = Number.isInteger(pid) && pid > 0 ? pid : 0;
+  const escapedDownloaded = escapePowerShellSingleQuoted(downloadedPath);
+  const escapedTarget = escapePowerShellSingleQuoted(portableTarget);
+
   return [
-    "@echo off",
-    "setlocal",
+    "$ErrorActionPreference = 'SilentlyContinue'",
     ...(safePid > 0
-      ? [
-          "set /a WAIT_COUNT=0",
-          ":wait_exit",
-          `tasklist /FI "PID eq ${safePid}" 2>nul | find /I "${safePid}" >nul`,
-          "if not errorlevel 1 (",
-          "  set /a WAIT_COUNT+=1",
-          "  if %WAIT_COUNT% LSS 15 (",
-          "    ping -n 2 127.0.0.1 >nul",
-          "    goto wait_exit",
-          "  )",
-          ")",
-        ]
+      ? [`Wait-Process -Id ${safePid} -Timeout 15 -ErrorAction SilentlyContinue`]
       : []),
-    "ping -n 2 127.0.0.1 >nul",
-    "set /a COPY_TRIES=0",
-    ":copy_retry",
-    `copy /Y "${downloadedPath}" "${portableTarget}" >nul 2>&1`,
-    "if errorlevel 1 (",
-    "  set /a COPY_TRIES+=1",
-    "  if %COPY_TRIES% LSS 10 (",
-    "    ping -n 2 127.0.0.1 >nul",
-    "    goto copy_retry",
-    "  )",
-    ")",
-    `start "" "${portableTarget}"`,
-    `del /F /Q "${downloadedPath}" >nul 2>&1`,
-    'del /F /Q "%~f0" >nul 2>&1',
+    "Start-Sleep -Milliseconds 500",
+    `$src = '${escapedDownloaded}'`,
+    `$dst = '${escapedTarget}'`,
+    "for ($i = 0; $i -lt 20; $i++) {",
+    "  try {",
+    "    Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop",
+    "    break",
+    "  } catch {",
+    "    Start-Sleep -Milliseconds 500",
+    "  }",
+    "}",
+    "if (Test-Path -LiteralPath $dst) {",
+    "  Start-Process -FilePath $dst",
+    "}",
+    "Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue",
+    "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
   ].join("\r\n");
 }
 
 /**
- * Builds a Windows batch script that waits for the exiting OrbitHUD PID,
- * runs the NSIS setup silently (`start /wait "" "<setup>" /S`), and explicitly
- * relaunches the installed OrbitHUD executable (since NSIS `/S` skips runAfterFinish).
+ * Builds a headless Windows PowerShell script that waits for the exiting OrbitHUD PID
+ * using native `Wait-Process` (no cmd.exe / tasklist / find / ping child consoles),
+ * runs the NSIS setup silently (`/S`) with a hard timeout, and explicitly relaunches
+ * the installed OrbitHUD executable (since NSIS `/S` skips runAfterFinish).
  */
 function buildWindowsNsisUpdateScript({ downloadedPath, execPath, pid }) {
   const safePid = Number.isInteger(pid) && pid > 0 ? pid : 0;
-  const relaunchTarget = execPath || "%LOCALAPPDATA%\\Programs\\OrbitHUD\\OrbitHUD.exe";
+  const escapedDownloaded = escapePowerShellSingleQuoted(downloadedPath);
+  const escapedExec = escapePowerShellSingleQuoted(execPath || "");
+
   return [
-    "@echo off",
-    "setlocal",
+    "$ErrorActionPreference = 'SilentlyContinue'",
     ...(safePid > 0
-      ? [
-          "set /a WAIT_COUNT=0",
-          ":wait_exit",
-          `tasklist /FI "PID eq ${safePid}" 2>nul | find /I "${safePid}" >nul`,
-          "if not errorlevel 1 (",
-          "  set /a WAIT_COUNT+=1",
-          "  if %WAIT_COUNT% LSS 15 (",
-          "    ping -n 2 127.0.0.1 >nul",
-          "    goto wait_exit",
-          "  )",
-          ")",
-        ]
+      ? [`Wait-Process -Id ${safePid} -Timeout 15 -ErrorAction SilentlyContinue`]
       : []),
-    "ping -n 2 127.0.0.1 >nul",
-    `start /wait "" "${downloadedPath}" /S`,
-    "ping -n 2 127.0.0.1 >nul",
-    `if exist "${relaunchTarget}" (`,
-    `  start "" "${relaunchTarget}"`,
-    `) else if exist "%LOCALAPPDATA%\\Programs\\OrbitHUD\\OrbitHUD.exe" (`,
-    `  start "" "%LOCALAPPDATA%\\Programs\\OrbitHUD\\OrbitHUD.exe"`,
-    ")",
-    `del /F /Q "${downloadedPath}" >nul 2>&1`,
-    'del /F /Q "%~f0" >nul 2>&1',
+    "Start-Sleep -Milliseconds 500",
+    `$setup = '${escapedDownloaded}'`,
+    "$installer = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru",
+    "if ($installer) {",
+    "  Wait-Process -Id $installer.Id -Timeout 120 -ErrorAction SilentlyContinue",
+    "}",
+    "Start-Sleep -Milliseconds 500",
+    `$target = '${escapedExec}'`,
+    "if (-not $target -or -not (Test-Path -LiteralPath $target)) {",
+    "  $target = Join-Path $env:LOCALAPPDATA 'Programs\\OrbitHUD\\OrbitHUD.exe'",
+    "}",
+    "if (Test-Path -LiteralPath $target) {",
+    "  Start-Process -FilePath $target",
+    "}",
+    "Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue",
+    "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
   ].join("\r\n");
 }
 
@@ -545,17 +544,42 @@ function installDownloadedUpdate(
 
   if (platform === "win32") {
     const portableTarget = env && env.PORTABLE_EXECUTABLE_FILE;
-    const batPath = path.join(os.tmpdir(), `orbithud-update-${Date.now()}.bat`);
-    const batContent = portableTarget
+    const ps1Path = path.join(os.tmpdir(), `orbithud-update-${Date.now()}.ps1`);
+    const ps1Content = portableTarget
       ? buildWindowsPortableUpdateScript({ downloadedPath, portableTarget, pid })
       : buildWindowsNsisUpdateScript({ downloadedPath, execPath, pid });
 
-    fs.writeFileSync(batPath, batContent, "utf8");
-    const child = spawn("cmd.exe", ["/c", batPath], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
+    // Prefix UTF-8 BOM so Windows PowerShell 5.1 reads non-ASCII / Unicode paths accurately
+    fs.writeFileSync(ps1Path, `\uFEFF${ps1Content}`, "utf8");
+
+    const systemRoot = (env && env.SystemRoot) || "C:\\Windows";
+    const fullPsPath = path.win32.join(
+      systemRoot,
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe"
+    );
+    const powershellExe = fs.existsSync(fullPsPath) ? fullPsPath : "powershell.exe";
+
+    const child = spawn(
+      powershellExe,
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-WindowStyle",
+        "Hidden",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        ps1Path,
+      ],
+      {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }
+    );
     child.unref();
     return { relaunching: true };
   }
@@ -614,6 +638,7 @@ module.exports = {
   verifyFileSha256,
   checkForUpdate,
   downloadFileWithProgress,
+  escapePowerShellSingleQuoted,
   buildWindowsPortableUpdateScript,
   buildWindowsNsisUpdateScript,
   buildLinuxAppImageUpdateScript,

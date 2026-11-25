@@ -535,25 +535,47 @@ console.log("  ✓ Antigravity auth_required vs connected classification passed"
   // 10. Test Auto-Updater relaunch scripts (Windows NSIS, Windows Portable, Linux AppImage, macOS Zip)
   const winNsisScript = buildWindowsNsisUpdateScript({
     downloadedPath: "C:\\Temp\\OrbitHUD-Windows-Setup.exe",
-    execPath: "C:\\Users\\Dev\\AppData\\Local\\Programs\\OrbitHUD\\OrbitHUD.exe",
+    execPath: "C:\\Users\\O'Brien\\AppData\\Local\\Programs\\OrbitHUD\\OrbitHUD.exe",
     pid: 12345,
   });
   assert.ok(!winNsisScript.includes("timeout /t"), "Windows NSIS script must not use timeout /t");
-  assert.ok(winNsisScript.includes('tasklist /FI "PID eq 12345"'));
-  assert.ok(winNsisScript.includes('start /wait "" "C:\\Temp\\OrbitHUD-Windows-Setup.exe" /S'));
+  assert.ok(!winNsisScript.includes("tasklist"), "Windows NSIS script must not spawn tasklist console");
+  assert.ok(!winNsisScript.includes("find /I"), "Windows NSIS script must not spawn find /I console");
+  assert.ok(!winNsisScript.includes("ping -n"), "Windows NSIS script must not spawn ping console");
+  assert.ok(winNsisScript.includes("Wait-Process -Id 12345 -Timeout 15"));
   assert.ok(
-    winNsisScript.includes('start "" "C:\\Users\\Dev\\AppData\\Local\\Programs\\OrbitHUD\\OrbitHUD.exe"')
+    winNsisScript.includes("$setup = 'C:\\Temp\\OrbitHUD-Windows-Setup.exe'"),
+    "Windows NSIS script should quote setup path"
   );
+  assert.ok(
+    winNsisScript.includes("$installer = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru")
+  );
+  assert.ok(winNsisScript.includes("Wait-Process -Id $installer.Id -Timeout 120"));
+  assert.ok(
+    winNsisScript.includes(
+      "$target = 'C:\\Users\\O''Brien\\AppData\\Local\\Programs\\OrbitHUD\\OrbitHUD.exe'"
+    ),
+    "Windows NSIS script must escape single quotes in paths"
+  );
+  assert.ok(winNsisScript.includes("Start-Process -FilePath $target"));
 
   const winPortableScript = buildWindowsPortableUpdateScript({
     downloadedPath: "C:\\Temp\\OrbitHUD-Windows-Portable.exe",
-    portableTarget: "D:\\Tools\\OrbitHUD.exe",
+    portableTarget: "D:\\Tools\\مجتبی\\OrbitHUD.exe",
     pid: 54321,
   });
   assert.ok(!winPortableScript.includes("timeout /t"), "Windows Portable script must not use timeout /t");
-  assert.ok(winPortableScript.includes('tasklist /FI "PID eq 54321"'));
-  assert.ok(winPortableScript.includes('copy /Y "C:\\Temp\\OrbitHUD-Windows-Portable.exe" "D:\\Tools\\OrbitHUD.exe"'));
-  assert.ok(winPortableScript.includes('start "" "D:\\Tools\\OrbitHUD.exe"'));
+  assert.ok(!winPortableScript.includes("tasklist"), "Windows Portable script must not spawn tasklist console");
+  assert.ok(!winPortableScript.includes("find /I"), "Windows Portable script must not spawn find /I console");
+  assert.ok(!winPortableScript.includes("ping -n"), "Windows Portable script must not spawn ping console");
+  assert.ok(winPortableScript.includes("Wait-Process -Id 54321 -Timeout 15"));
+  assert.ok(
+    winPortableScript.includes(
+      "Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop"
+    )
+  );
+  assert.ok(winPortableScript.includes("$dst = 'D:\\Tools\\مجتبی\\OrbitHUD.exe'"));
+  assert.ok(winPortableScript.includes("Start-Process -FilePath $dst"));
 
   const linuxScript = buildLinuxAppImageUpdateScript({
     downloadedPath: "/tmp/OrbitHUD-Linux-x86_64.AppImage",
