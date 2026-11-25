@@ -11,7 +11,9 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Release-v1.2.2-38BDF8?style=flat-square" alt="Release v1.2.2" />
+    <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/mojtaba-afraz/OrbitHUD?style=flat-square&color=38BDF8&label=Release" alt="Latest Release" /></a>
+    <a href="../../releases"><img src="https://img.shields.io/github/downloads/mojtaba-afraz/OrbitHUD/total?style=flat-square&color=3DDB94&label=Downloads" alt="Total Downloads" /></a>
+    <a href="../../releases/latest"><img src="https://img.shields.io/github/downloads/mojtaba-afraz/OrbitHUD/latest/total?style=flat-square&color=22D3EE&label=Latest%20Downloads" alt="Latest Release Downloads" /></a>
     <img src="https://img.shields.io/badge/Providers-Antigravity%20%7C%20Claude%20Code%20%7C%20Codex-E8926B?style=flat-square" alt="Providers" />
     <img src="https://img.shields.io/badge/License-MIT-3DDB94?style=flat-square" alt="MIT License" />
     <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-22D3EE?style=flat-square" alt="Platforms" />

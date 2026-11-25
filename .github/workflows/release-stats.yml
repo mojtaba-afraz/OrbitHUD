@@ -1,0 +1,29 @@
+name: Release Download Analytics
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly summary every Monday at 09:00 UTC
+    - cron: "0 9 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  download-stats:
+    name: Summarize Release Downloads
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate Download Analytics Summary
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/release_stats.mjs --repo "${{ github.repository }}" --markdown | tee -a "$GITHUB_STEP_SUMMARY"

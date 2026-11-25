@@ -24,7 +24,7 @@ Focus: Full parity between native macOS and Windows/Linux, plus proactive alerts
 | ⬜ | **Configurable Primary Quota Model** in Menu Bar & System Tray (Auto Lowest or Pinned Model) | macOS, Win/Linux | [#3](https://github.com/mojtaba-afraz/OrbitHUD/issues/3) |
 | ⬜ | **Smart Quota Alerts & Reset Notifications** (low-quota threshold & 5h window reset alerts) | macOS, Win/Linux | [#4](https://github.com/mojtaba-afraz/OrbitHUD/issues/4) |
 | ⬜ | **Global Hotkey** to toggle HUD visibility & Bento/Compact Pill layout | macOS, Win/Linux | [#5](https://github.com/mojtaba-afraz/OrbitHUD/issues/5) |
-| ⬜ | **Release Download Analytics** (per-version & per-OS stats via GitHub API, zero telemetry) | CI / Docs | [#11](https://github.com/mojtaba-afraz/OrbitHUD/issues/11) |
+| ✅ | **Release Download Analytics** (per-version & per-OS stats via GitHub API, zero telemetry) | CI / Docs | [#11](https://github.com/mojtaba-afraz/OrbitHUD/issues/11) |
 
 ---
 

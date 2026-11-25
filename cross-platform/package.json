@@ -5,7 +5,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node tests/quotaFetcher.test.js",
+    "test": "node tests/quotaFetcher.test.js && node tests/releaseStats.test.mjs",
     "dist:win": "electron-builder --win --x64 --arm64",
     "dist:linux": "electron-builder --linux AppImage deb",
     "dist:mac": "electron-builder --mac dmg zip",
