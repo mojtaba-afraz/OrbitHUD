@@ -2,6 +2,7 @@
 
 const https = require("node:https");
 const http = require("node:http");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
@@ -84,6 +85,139 @@ function selectAssetForPlatform(
 }
 
 /**
+ * Finds the SHA256SUMS.txt asset in a GitHub release's assets array.
+ */
+function selectChecksumAsset(assets) {
+  if (!Array.isArray(assets) || assets.length === 0) return null;
+  return (
+    assets.find(
+      (a) =>
+        a &&
+        typeof a.name === "string" &&
+        typeof a.browser_download_url === "string" &&
+        /^SHA256SUMS(\.txt)?$/i.test(a.name.trim())
+    ) || null
+  );
+}
+
+/**
+ * Performs an HTTPS GET returning UTF-8 text (follows redirects).
+ */
+function fetchText(url, maxRedirects = 4) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith("https:") ? https : http;
+    const req = client.get(
+      url,
+      {
+        headers: {
+          "User-Agent": "OrbitHUD-AutoUpdater",
+          Accept: "text/plain, application/octet-stream, */*",
+        },
+        timeout: 10000,
+      },
+      (res) => {
+        if (
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location &&
+          maxRedirects > 0
+        ) {
+          res.resume();
+          resolve(fetchText(res.headers.location, maxRedirects - 1));
+          return;
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume();
+          reject(new Error(`Checksum fetch failed with HTTP ${res.statusCode}`));
+          return;
+        }
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => resolve(body));
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy(new Error("Checksum request timed out"));
+    });
+  });
+}
+
+/**
+ * Parses standard `sha256sum` text (e.g. `<hex>  <filename>` or `<hex> *<filename>`)
+ * into a map `{ [basename]: lowercaseHex }`.
+ */
+function parseSha256Sums(text) {
+  const sums = {};
+  if (!text || typeof text !== "string") return sums;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
+    if (!match) continue;
+    const hash = match[1].toLowerCase();
+    const rawName = match[2].trim().replace(/^\.\//, "");
+    const baseName = path.posix.basename(rawName.replace(/\\/g, "/"));
+    if (baseName) {
+      sums[baseName] = hash;
+    }
+  }
+  return sums;
+}
+
+/**
+ * Computes the lowercase hex SHA256 digest of a file on disk.
+ */
+function computeFileSha256(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex").toLowerCase()));
+    stream.on("error", reject);
+  });
+}
+
+/**
+ * Verifies a downloaded file against an expected 64-char hex SHA256 digest.
+ * Deletes the file and throws on mismatch or invalid expected hash.
+ */
+async function verifyFileSha256(filePath, expectedHash) {
+  const cleanup = () => {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {
+      // ignore cleanup errors
+    }
+  };
+
+  if (typeof expectedHash !== "string" || !/^[0-9a-fA-F]{64}$/.test(expectedHash.trim())) {
+    cleanup();
+    throw new Error("Invalid expected SHA256 checksum format");
+  }
+
+  const normalizedExpected = expectedHash.trim().toLowerCase();
+  const actual = await computeFileSha256(filePath);
+  const expectedBuf = Buffer.from(normalizedExpected, "hex");
+  const actualBuf = Buffer.from(actual, "hex");
+
+  if (
+    expectedBuf.length !== actualBuf.length ||
+    !crypto.timingSafeEqual(expectedBuf, actualBuf)
+  ) {
+    cleanup();
+    throw new Error(
+      `SHA256 checksum mismatch (expected ${normalizedExpected.slice(0, 12)}..., got ${actual.slice(0, 12)}...)`
+    );
+  }
+
+  return { verified: true, sha256: actual };
+}
+
+/**
  * Performs an HTTPS GET returning parsed JSON (follows redirects).
  */
 function fetchJson(url, maxRedirects = 4) {
@@ -148,6 +282,7 @@ async function checkForUpdate(
   const latestVersion = String(release.tag_name || "").replace(/^v/i, "");
   const isNewer = compareSemver(latestVersion, currentVersion) > 0;
   const asset = selectAssetForPlatform(release.assets || [], platform, env);
+  const checksumAsset = selectChecksumAsset(release.assets || []);
 
   return {
     available: Boolean(isNewer && asset),
@@ -162,6 +297,12 @@ async function checkForUpdate(
           name: asset.name,
           url: asset.browser_download_url,
           size: asset.size || 0,
+        }
+      : null,
+    checksumAsset: checksumAsset
+      ? {
+          name: checksumAsset.name,
+          url: checksumAsset.browser_download_url,
         }
       : null,
   };
@@ -347,6 +488,11 @@ module.exports = {
   parseSemver,
   compareSemver,
   selectAssetForPlatform,
+  selectChecksumAsset,
+  fetchText,
+  parseSha256Sums,
+  computeFileSha256,
+  verifyFileSha256,
   checkForUpdate,
   downloadFileWithProgress,
   installDownloadedUpdate,

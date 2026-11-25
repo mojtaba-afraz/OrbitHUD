@@ -20,7 +20,11 @@ const {
   checkForUpdate,
   downloadFileWithProgress,
   installDownloadedUpdate,
+  fetchText,
+  parseSha256Sums,
+  verifyFileSha256,
 } = require("./autoUpdater");
+const { resolveWindowPosition } = require("./windowBounds");
 
 const providerManager = new ProviderManager();
 
@@ -43,6 +47,7 @@ let updateState = {
   error: null,
   dismissed: false,
   asset: null,
+  checksumAsset: null,
   releaseUrl: null,
 };
 
@@ -266,13 +271,90 @@ function getAppIconImage() {
   return nativeImage.createEmpty();
 }
 
+function getLinuxAutostartPath() {
+  const configHome =
+    process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(configHome, "autostart", "orbithud.desktop");
+}
+
+function getLaunchAtLogin() {
+  try {
+    if (process.platform === "linux") {
+      return fs.existsSync(getLinuxAutostartPath());
+    }
+    return Boolean(app.getLoginItemSettings().openAtLogin);
+  } catch {
+    return false;
+  }
+}
+
+function setLaunchAtLogin(enabled) {
+  const target = Boolean(enabled);
+  try {
+    if (process.platform === "linux") {
+      const desktopFile = getLinuxAutostartPath();
+      if (target) {
+        const execTarget = process.env.APPIMAGE || process.execPath;
+        const desktopEntry = [
+          "[Desktop Entry]",
+          "Type=Application",
+          "Name=OrbitHUD",
+          "Comment=Zero-Gravity AI Usage & Quota HUD",
+          `Exec="${execTarget}"`,
+          "Terminal=false",
+          "X-GNOME-Autostart-enabled=true",
+          "",
+        ].join("\n");
+        fs.mkdirSync(path.dirname(desktopFile), { recursive: true });
+        fs.writeFileSync(desktopFile, desktopEntry, "utf8");
+      } else if (fs.existsSync(desktopFile)) {
+        fs.unlinkSync(desktopFile);
+      }
+    } else {
+      app.setLoginItemSettings({ openAtLogin: target });
+    }
+  } catch {
+    // ignore OS-level permission failures and re-sync menu state below
+  }
+  updateTrayMenu();
+}
+
+function ensureWidgetOnScreen() {
+  if (!widgetWindow || widgetWindow.isDestroyed()) return;
+  const [curX, curY] = widgetWindow.getPosition();
+  const [curW, curH] = widgetWindow.getSize();
+  const resolved = resolveWindowPosition({
+    savedX: curX,
+    savedY: curY,
+    width: curW,
+    height: curH,
+    displays: screen.getAllDisplays(),
+    primaryDisplay: screen.getPrimaryDisplay(),
+  });
+  if (resolved.wasReset) {
+    widgetWindow.setPosition(resolved.x, resolved.y, false);
+    state.x = resolved.x;
+    state.y = resolved.y;
+    saveState();
+  }
+}
+
 function createWidgetWindow() {
   const { width, height } = getTargetDimensions();
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const workArea = primaryDisplay.workArea;
+  const resolvedPos = resolveWindowPosition({
+    savedX: typeof state.x === "number" ? state.x : null,
+    savedY: typeof state.y === "number" ? state.y : null,
+    width,
+    height,
+    displays: screen.getAllDisplays(),
+    primaryDisplay: screen.getPrimaryDisplay(),
+  });
 
-  const defaultX = workArea.x + workArea.width - width - 28;
-  const defaultY = workArea.y + 40;
+  if (resolvedPos.wasReset && (state.x !== null || state.y !== null)) {
+    state.x = resolvedPos.x;
+    state.y = resolvedPos.y;
+    saveState();
+  }
 
   widgetWindow = new BrowserWindow({
     width,
@@ -282,8 +364,8 @@ function createWidgetWindow() {
     minHeight: height,
     maxHeight: height,
     useContentSize: true,
-    x: typeof state.x === "number" ? state.x : defaultX,
-    y: typeof state.y === "number" ? state.y : defaultY,
+    x: resolvedPos.x,
+    y: resolvedPos.y,
     frame: false,
     transparent: true,
     resizable: false,
@@ -413,6 +495,7 @@ async function runUpdateCheck(manual = false) {
         error: null,
         dismissed: false,
         asset: info.asset,
+        checksumAsset: info.checksumAsset || null,
         releaseUrl: info.releaseUrl,
       };
     } else {
@@ -457,6 +540,32 @@ async function startAutoUpdateDownload() {
       updateState.progress = pct;
       sendStateToRenderer();
     });
+
+    // Fail-closed SHA256 verification against SHA256SUMS.txt before executing installer
+    if (!updateState.checksumAsset || !updateState.checksumAsset.url) {
+      try {
+        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+      } catch {
+        // ignore cleanup errors
+      }
+      throw new Error("Update aborted: SHA256SUMS.txt missing from release");
+    }
+
+    const checksumText = await fetchText(updateState.checksumAsset.url);
+    const sums = parseSha256Sums(checksumText);
+    const expectedHash = sums[updateState.asset.name];
+    if (!expectedHash) {
+      try {
+        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+      } catch {
+        // ignore cleanup errors
+      }
+      throw new Error(
+        `Update aborted: no SHA256 checksum found for ${updateState.asset.name}`
+      );
+    }
+
+    await verifyFileSha256(destPath, expectedHash);
 
     updateState.status = "installing";
     updateState.progress = 100;
@@ -734,6 +843,14 @@ function buildControlMenuTemplate() {
       },
     },
     {
+      label: "Launch at Login",
+      type: "checkbox",
+      checked: getLaunchAtLogin(),
+      click: () => {
+        setLaunchAtLogin(!getLaunchAtLogin());
+      },
+    },
+    {
       label: "Window Opacity",
       submenu: [1.0, 0.95, 0.85, 0.75, 0.65].map((op) => ({
         label: `${Math.round(op * 100)}%`,
@@ -888,6 +1005,8 @@ app.whenReady().then(() => {
   }
   createTrayIcon();
   createWidgetWindow();
+  screen.on("display-removed", ensureWidgetOnScreen);
+  screen.on("display-metrics-changed", ensureWidgetOnScreen);
   setupAuthAndDaemonWatchers();
   scheduleRefreshTimer(20000);
   setTimeout(() => runUpdateCheck(false), 5000);

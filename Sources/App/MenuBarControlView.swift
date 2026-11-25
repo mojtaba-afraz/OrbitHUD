@@ -129,6 +129,15 @@ struct MenuBarControlView: View {
                         .font(.system(size: 11, design: .rounded))
                 }
 
+                Toggle(
+                    "Launch at Login",
+                    isOn: Binding(
+                        get: { viewModel.launchAtLogin },
+                        set: { viewModel.setLaunchAtLogin($0) }
+                    )
+                )
+                .font(.system(size: 11, design: .rounded))
+
                 HStack(spacing: 8) {
                     Text("Opacity")
                         .font(.system(size: 11, design: .rounded))
@@ -160,6 +169,7 @@ struct MenuBarControlView: View {
         .frame(width: 356)
         .environment(\.colorScheme, .dark)
         .onAppear {
+            viewModel.refreshLaunchAtLoginStatus()
             Task { await viewModel.refreshNow() }
         }
     }

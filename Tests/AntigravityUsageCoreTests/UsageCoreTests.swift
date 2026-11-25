@@ -4,6 +4,8 @@ import XCTest
 #endif
 
 final class UsageCoreTests: XCTestCase {
+    // MARK: - LanguageServerQuotaFetcher
+
     func testParseRetrieveUserQuotaSummaryJSON() {
         let jsonString = """
         {"response":{"groups":[{"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-weekly","displayName":"Weekly Limit Remaining","window":"weekly","remainingFraction":0.7424301,"resetTime":"2026-11-29T12:45:02Z"},{"bucketId":"gemini-5h","displayName":"Five Hour Limit Remaining","window":"5h","remainingFraction":0.44642693,"resetTime":"2026-11-23T14:10:34Z"}]},{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-weekly","displayName":"Weekly Limit Remaining","window":"weekly","remainingFraction":1,"resetTime":"2026-11-30T10:59:39Z"},{"bucketId":"3p-5h","displayName":"Five Hour Limit Remaining","window":"5h","remainingFraction":1,"resetTime":"2026-11-23T15:59:39Z"}]},{"displayName":"Gemini 4 Argon","buckets":[{"bucketId":"gemini-argon-wtu-weekly","displayName":"Gemini 4 Argon Weekly Limit","window":"weekly","remainingFraction":0.9263821,"resetTime":"2026-11-30T09:58:45Z"}]}]}}
@@ -44,5 +46,259 @@ final class UsageCoreTests: XCTestCase {
         XCTAssertNil(
             LanguageServerQuotaFetcher.classifyQuotaResponse(statusCode: 500, data: serverErr)
         )
+    }
+
+    // MARK: - TokenFormatter
+
+    func testTokenFormatterFormat() {
+        XCTAssertEqual(TokenFormatter.format(0), "0")
+        XCTAssertEqual(TokenFormatter.format(42), "42")
+        XCTAssertEqual(TokenFormatter.format(999), "999")
+        XCTAssertEqual(TokenFormatter.format(1_000), "1.0K")
+        XCTAssertEqual(TokenFormatter.format(1_500), "1.5K")
+        XCTAssertEqual(TokenFormatter.format(50_000), "50.0K")
+        XCTAssertEqual(TokenFormatter.format(125_400), "125.4K")
+        XCTAssertEqual(TokenFormatter.format(999_949), "999.9K")
+        XCTAssertEqual(TokenFormatter.format(1_000_000), "1.0M")
+        XCTAssertEqual(TokenFormatter.format(2_500_000), "2.5M")
+    }
+
+    func testTokenFormatterHumanReadableModelName() {
+        XCTAssertEqual(TokenFormatter.humanReadableModelName("gemini-4-argon"), "Gemini 4 Argon")
+        XCTAssertEqual(TokenFormatter.humanReadableModelName("gemini-2.5-pro"), "Gemini Pro")
+        XCTAssertEqual(TokenFormatter.humanReadableModelName("gemini-2.5-flash-lite"), "Gemini Flash Lite")
+        XCTAssertEqual(TokenFormatter.humanReadableModelName("gemini-2.5-flash"), "Gemini Flash")
+        XCTAssertEqual(TokenFormatter.humanReadableModelName("claude-3-7-sonnet"), "Claude Sonnet")
+        XCTAssertEqual(TokenFormatter.humanReadableModelName("claude-4-opus"), "Claude Opus")
+        XCTAssertEqual(TokenFormatter.humanReadableModelName("custom_model-v1"), "Custom Model V1")
+    }
+
+    // MARK: - ClaudeCodeQuotaFetcher
+
+    func testClaudeCodeParseAccessTokenVariants() {
+        let nestedOauth = #"{"claudeAiOauth":{"accessToken":"  sk-ant-oat01-abc  "}}"#
+        XCTAssertEqual(ClaudeCodeQuotaFetcher.parseAccessToken(from: nestedOauth), "sk-ant-oat01-abc")
+
+        let genericOauth = #"{"oauth":{"access_token":"sk-ant-oat01-xyz"}}"#
+        XCTAssertEqual(ClaudeCodeQuotaFetcher.parseAccessToken(from: genericOauth), "sk-ant-oat01-xyz")
+
+        let topLevel = #"{"accessToken":"sk-ant-top-123"}"#
+        XCTAssertEqual(ClaudeCodeQuotaFetcher.parseAccessToken(from: topLevel), "sk-ant-top-123")
+
+        XCTAssertNil(ClaudeCodeQuotaFetcher.parseAccessToken(from: #"{"claudeAiOauth":{"accessToken":"   "}}"#))
+        XCTAssertNil(ClaudeCodeQuotaFetcher.parseAccessToken(from: "not-json"))
+    }
+
+    func testClaudeCodeParseUsageJSON() {
+        let jsonString = """
+        {
+          "five_hour": { "utilization": 33.0, "resets_at": "2026-11-23T14:00:00.500Z" },
+          "seven_day": { "utilization": 0.25, "resets_at": "2026-11-29T11:00:00Z" },
+          "seven_day_sonnet": { "utilization": 10.0, "resetsAt": "2026-11-29T11:00:00Z" },
+          "seven_day_opus": { "utilization": 50.0, "resets_at": "2026-11-29T11:00:00Z" }
+        }
+        """
+        let groups = ClaudeCodeQuotaFetcher.parseUsageJSON(Data(jsonString.utf8))
+        XCTAssertNotNil(groups)
+        XCTAssertEqual(groups?.count, 3)
+
+        let primary = groups?[0]
+        XCTAssertEqual(primary?.id, "claude-code::primary")
+        XCTAssertEqual(primary?.providerId, "claude-code")
+        XCTAssertEqual(primary?.buckets.count, 2)
+        XCTAssertEqual(primary?.buckets[0].window, "5h")
+        XCTAssertEqual(primary?.buckets[0].remainingPercentage, 67)
+        XCTAssertNotNil(primary?.buckets[0].resetTime)
+        XCTAssertEqual(primary?.buckets[1].window, "weekly")
+        XCTAssertEqual(primary?.buckets[1].remainingPercentage, 75)
+        XCTAssertNotNil(primary?.buckets[1].resetTime)
+
+        XCTAssertEqual(groups?[1].id, "claude-code::sonnet")
+        XCTAssertEqual(groups?[1].buckets[0].remainingPercentage, 90)
+        XCTAssertEqual(groups?[2].id, "claude-code::opus")
+        XCTAssertEqual(groups?[2].buckets[0].remainingPercentage, 50)
+
+        XCTAssertNil(ClaudeCodeQuotaFetcher.parseUsageJSON(Data("{}".utf8)))
+        XCTAssertNil(ClaudeCodeQuotaFetcher.parseUsageJSON(Data("invalid".utf8)))
+    }
+
+    // MARK: - CodexQuotaFetcher
+
+    func testCodexParseCredentialsVariants() {
+        let nested = #"{"tokens":{"access_token":"codex-tok-1","account_id":"acct_123"}}"#
+        let parsed1 = CodexQuotaFetcher.parseCredentials(from: nested)
+        XCTAssertEqual(parsed1?.accessToken, "codex-tok-1")
+        XCTAssertEqual(parsed1?.accountId, "acct_123")
+
+        let camel = #"{"tokens":{"accessToken":"codex-tok-2","accountId":"acct_456"}}"#
+        let parsed2 = CodexQuotaFetcher.parseCredentials(from: camel)
+        XCTAssertEqual(parsed2?.accessToken, "codex-tok-2")
+        XCTAssertEqual(parsed2?.accountId, "acct_456")
+
+        let envStyle = #"{"OPENAI_ACCESS_TOKEN":"  codex-tok-3  "}"#
+        let parsed3 = CodexQuotaFetcher.parseCredentials(from: envStyle)
+        XCTAssertEqual(parsed3?.accessToken, "codex-tok-3")
+        XCTAssertNil(parsed3?.accountId)
+
+        XCTAssertNil(CodexQuotaFetcher.parseCredentials(from: #"{"tokens":{"access_token":""}}"#))
+        XCTAssertNil(CodexQuotaFetcher.parseCredentials(from: "bad-json"))
+    }
+
+    func testCodexParseUsageJSON() {
+        let refNow = Date(timeIntervalSince1970: 1_760_000_000)
+        let jsonString = """
+        {
+          "plan_type": "Plus",
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 25.0,
+              "limit_window_seconds": 18000,
+              "reset_after_seconds": 7200
+            },
+            "secondary_window": {
+              "used_percent": 40.0,
+              "limit_window_seconds": 604800,
+              "reset_at": 1760604800000
+            }
+          }
+        }
+        """
+        let groups = CodexQuotaFetcher.parseUsageJSON(Data(jsonString.utf8), now: refNow)
+        XCTAssertNotNil(groups)
+        XCTAssertEqual(groups?.count, 1)
+        XCTAssertEqual(groups?[0].id, "codex::primary")
+        XCTAssertEqual(groups?[0].providerId, "codex")
+        XCTAssertEqual(groups?[0].displayName, "Codex CLI (Plus)")
+        XCTAssertEqual(groups?[0].buckets.count, 2)
+
+        XCTAssertEqual(groups?[0].buckets[0].window, "5h")
+        XCTAssertEqual(groups?[0].buckets[0].remainingPercentage, 75)
+        XCTAssertEqual(groups?[0].buckets[0].resetTime?.timeIntervalSince1970 ?? 0, 1_760_007_200, accuracy: 0.5)
+
+        XCTAssertEqual(groups?[0].buckets[1].window, "weekly")
+        XCTAssertEqual(groups?[0].buckets[1].remainingPercentage, 60)
+        XCTAssertEqual(groups?[0].buckets[1].resetTime?.timeIntervalSince1970 ?? 0, 1_760_604_800, accuracy: 0.5)
+
+        // Daily window & missing plan_type
+        let dailyJson = """
+        {
+          "rateLimit": {
+            "primaryWindow": {
+              "usedPercent": 0.2,
+              "window_seconds": 86400,
+              "reset_at": 1760086400
+            }
+          }
+        }
+        """
+        let dailyGroups = CodexQuotaFetcher.parseUsageJSON(Data(dailyJson.utf8), now: refNow)
+        XCTAssertEqual(dailyGroups?[0].displayName, "Codex CLI")
+        XCTAssertEqual(dailyGroups?[0].buckets[0].window, "daily")
+        XCTAssertEqual(dailyGroups?[0].buckets[0].remainingPercentage, 80)
+
+        XCTAssertNil(CodexQuotaFetcher.parseUsageJSON(Data("{}".utf8), now: refNow))
+        XCTAssertNil(CodexQuotaFetcher.parseUsageJSON(Data("not-json".utf8), now: refNow))
+    }
+
+    // MARK: - TranscriptUsageAggregator
+
+    func testParseTranscriptJSONL() {
+        let jsonl = """
+        {"type":"USER_INPUT","content":"hello"}
+        {"created_at":"2026-11-23T10:15:30.250Z","model":"gemini-2.5-pro","input_tokens":1200,"output_tokens":300,"cache_read_tokens":500}
+        {"created_at":"2026-11-23T11:00:00Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0}
+        not valid json with "input_tokens"
+        {"created_at":"2026-11-23T12:00:00Z","output_tokens":450}
+        """
+
+        let steps = TranscriptUsageAggregator.parseTranscriptJSONL(jsonl)
+        XCTAssertEqual(steps.count, 2)
+
+        XCTAssertEqual(steps[0].model, "gemini-2.5-pro")
+        XCTAssertEqual(steps[0].inputTokens, 1200)
+        XCTAssertEqual(steps[0].outputTokens, 300)
+        XCTAssertEqual(steps[0].cacheReadTokens, 500)
+
+        XCTAssertEqual(steps[1].model, "unknown")
+        XCTAssertEqual(steps[1].inputTokens, 0)
+        XCTAssertEqual(steps[1].outputTokens, 450)
+        XCTAssertEqual(steps[1].cacheReadTokens, 0)
+    }
+
+    func testAggregateTranscriptSteps() {
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        let iso = ISO8601DateFormatter()
+        let refDate = iso.date(from: "2026-11-23T15:00:00Z")!
+        let todayEarly = iso.date(from: "2026-11-23T09:00:00Z")!
+        let todayLate = iso.date(from: "2026-11-23T14:30:00Z")!
+        let threeDaysAgo = iso.date(from: "2026-11-20T12:00:00Z")!
+        let tenDaysAgo = iso.date(from: "2026-11-13T12:00:00Z")!
+
+        let steps: [ParsedTranscriptStep] = [
+            ParsedTranscriptStep(createdAt: todayEarly, model: "gemini-2.5-pro", inputTokens: 1000, outputTokens: 200, cacheReadTokens: 300),
+            ParsedTranscriptStep(createdAt: todayLate, model: "claude-3-7-sonnet", inputTokens: 4000, outputTokens: 500, cacheReadTokens: 500),
+            ParsedTranscriptStep(createdAt: threeDaysAgo, model: "gemini-2.5-pro", inputTokens: 2000, outputTokens: 1000, cacheReadTokens: 0),
+            ParsedTranscriptStep(createdAt: tenDaysAgo, model: "gemini-2.5-flash", inputTokens: 99_999, outputTokens: 0, cacheReadTokens: 0),
+        ]
+
+        let summary = TranscriptUsageAggregator.aggregate(
+            steps: steps,
+            scannedConversationsCount: 2,
+            referenceDate: refDate,
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(summary.scannedConversationsCount, 2)
+        XCTAssertEqual(summary.todayInputTokens, 5000)
+        XCTAssertEqual(summary.todayOutputTokens, 700)
+        XCTAssertEqual(summary.todayCacheReadTokens, 800)
+        XCTAssertEqual(summary.todayTotalTokens, 6500)
+        XCTAssertEqual(summary.todayStepCount, 2)
+        // 7-day total excludes tenDaysAgo: 1500 + 5000 + 3000 = 9500
+        XCTAssertEqual(summary.sevenDayTotalTokens, 9500)
+        XCTAssertEqual(summary.dailyBuckets.count, 7)
+        XCTAssertEqual(summary.dailyBuckets.last?.id, "2026-11-23")
+        XCTAssertEqual(summary.dailyBuckets.last?.totalTokens, 6500)
+        // Latest step is todayLate (claude-3-7-sonnet -> Claude Sonnet)
+        XCTAssertEqual(summary.activeModelName, "Claude Sonnet")
+        // Sorted descending by totalTokens: Claude Sonnet (5000) > Gemini Pro (4500)
+        XCTAssertEqual(summary.modelBreakdowns.count, 2)
+        XCTAssertEqual(summary.modelBreakdowns[0].modelName, "Claude Sonnet")
+        XCTAssertEqual(summary.modelBreakdowns[0].totalTokens, 5000)
+        XCTAssertEqual(summary.modelBreakdowns[1].modelName, "Gemini Pro")
+        XCTAssertEqual(summary.modelBreakdowns[1].totalTokens, 4500)
+    }
+
+    func testCollectUsageSummaryFromTempBrainDirectory() throws {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("orbithud-transcript-test-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let logsDir = tempRoot
+            .appendingPathComponent("conv-1")
+            .appendingPathComponent(".system_generated")
+            .appendingPathComponent("logs")
+        try fm.createDirectory(at: logsDir, withIntermediateDirectories: true)
+
+        let iso = ISO8601DateFormatter()
+        let refDate = iso.date(from: "2026-11-23T12:00:00Z")!
+        let transcriptURL = logsDir.appendingPathComponent("transcript.jsonl")
+        let content = """
+        {"created_at":"2026-11-23T10:00:00Z","model":"gemini-4-argon","input_tokens":20000,"output_tokens":5000,"cache_read_tokens":25000}
+        """
+        try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let aggregator = TranscriptUsageAggregator(brainDirectoryURL: tempRoot)
+        let first = aggregator.collectUsageSummary(referenceDate: refDate)
+        XCTAssertEqual(first.scannedConversationsCount, 1)
+        XCTAssertEqual(first.todayTotalTokens, 50_000)
+        XCTAssertEqual(TokenFormatter.format(first.todayTotalTokens), "50.0K")
+        XCTAssertEqual(first.activeModelName, "Gemini 4 Argon")
+
+        // Second call hits fileCache and returns identical summary
+        let second = aggregator.collectUsageSummary(referenceDate: refDate)
+        XCTAssertEqual(second, first)
     }
 }

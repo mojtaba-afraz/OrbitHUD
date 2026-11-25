@@ -470,10 +470,11 @@ public struct AntigravityUsageSnapshot: Codable, Equatable {
 
 public enum TokenFormatter {
     public static func format(_ count: Int) -> String {
+        let posix = Locale(identifier: "en_US_POSIX")
         if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000.0)
+            return String(format: "%.1fM", locale: posix, Double(count) / 1_000_000.0)
         } else if count >= 1_000 {
-            return String(format: "%.1fK", Double(count) / 1_000_000.0)
+            return String(format: "%.1fK", locale: posix, Double(count) / 1_000.0)
         } else {
             return "\(count)"
         }

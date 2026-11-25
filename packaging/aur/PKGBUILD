@@ -1,6 +1,6 @@
 # Maintainer: Mojtaba Afraz <mojtaba.afraz@users.noreply.github.com>
 pkgname=orbithud-bin
-pkgver=1.2.1
+pkgver=1.2.2
 pkgrel=1
 pkgdesc="Zero-Gravity Glassmorphic Usage & Quota HUD for Google Antigravity, Claude Code, and Codex CLI"
 arch=('x86_64')

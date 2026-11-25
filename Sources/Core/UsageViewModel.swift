@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ServiceManagement
 
 @MainActor
 public final class UsageViewModel: ObservableObject {
@@ -57,6 +58,7 @@ public final class UsageViewModel: ObservableObject {
     @Published public var isRefreshing: Bool = false
     @Published public var isWidgetHovered: Bool = false
     @Published public var hoveredCardId: String? = nil
+    @Published public private(set) var launchAtLogin: Bool = false
 
     public var orderedEnabledProviders: [QuotaProviderID] {
         QuotaProviderID.allCases.filter { enabledProviders.contains($0) }
@@ -132,6 +134,27 @@ public final class UsageViewModel: ObservableObject {
         hiddenGroupIds.removeAll()
     }
 
+    public func refreshLaunchAtLoginStatus() {
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    public func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } else {
+                if SMAppService.mainApp.status == .enabled {
+                    try SMAppService.mainApp.unregister()
+                }
+            }
+        } catch {
+            // Re-sync with actual system status below (e.g. unbundled dev binary or user-denied permission)
+        }
+        refreshLaunchAtLoginStatus()
+    }
+
     public var onWindowConfigChanged: (() -> Void)?
 
     private let quotaFetcher = LanguageServerQuotaFetcher()
@@ -178,6 +201,8 @@ public final class UsageViewModel: ObservableObject {
                 statusMessage: "Syncing..."
             )
         }
+
+        self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
         restartTimer()
         setupAuthAndDaemonWatchers()

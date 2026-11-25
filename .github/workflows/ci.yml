@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  swift-tests:
+    name: Swift Tests & Build (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Swift Unit Tests
+        run: swift test
+
+      - name: Build macOS Target
+        run: swift build
+
+  electron-tests:
+    name: Cross-Platform Unit Tests (Node)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cross-platform
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run Cross-Platform Unit Tests
+        run: npm test
