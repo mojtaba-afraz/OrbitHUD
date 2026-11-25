@@ -19,6 +19,10 @@ const {
   parseSha256Sums,
   computeFileSha256,
   verifyFileSha256,
+  buildWindowsPortableUpdateScript,
+  buildWindowsNsisUpdateScript,
+  buildLinuxAppImageUpdateScript,
+  buildMacZipUpdateScript,
 } = require("../src/autoUpdater");
 const {
   isRectVisibleOnDisplays,
@@ -493,6 +497,48 @@ console.log("  ✓ Antigravity auth_required vs connected classification passed"
   assert.equal(fs.existsSync(badFile), false);
   fs.rmSync(tmpDir, { recursive: true, force: true });
   console.log("  ✓ Auto-Updater SHA256 checksum parsing & verification passed");
+
+  // 10. Test Auto-Updater relaunch scripts (Windows NSIS, Windows Portable, Linux AppImage, macOS Zip)
+  const winNsisScript = buildWindowsNsisUpdateScript({
+    downloadedPath: "C:\\Temp\\OrbitHUD-Windows-Setup.exe",
+    execPath: "C:\\Users\\Dev\\AppData\\Local\\Programs\\OrbitHUD\\OrbitHUD.exe",
+    pid: 12345,
+  });
+  assert.ok(!winNsisScript.includes("timeout /t"), "Windows NSIS script must not use timeout /t");
+  assert.ok(winNsisScript.includes('tasklist /FI "PID eq 12345"'));
+  assert.ok(winNsisScript.includes('start /wait "" "C:\\Temp\\OrbitHUD-Windows-Setup.exe" /S'));
+  assert.ok(
+    winNsisScript.includes('start "" "C:\\Users\\Dev\\AppData\\Local\\Programs\\OrbitHUD\\OrbitHUD.exe"')
+  );
+
+  const winPortableScript = buildWindowsPortableUpdateScript({
+    downloadedPath: "C:\\Temp\\OrbitHUD-Windows-Portable.exe",
+    portableTarget: "D:\\Tools\\OrbitHUD.exe",
+    pid: 54321,
+  });
+  assert.ok(!winPortableScript.includes("timeout /t"), "Windows Portable script must not use timeout /t");
+  assert.ok(winPortableScript.includes('tasklist /FI "PID eq 54321"'));
+  assert.ok(winPortableScript.includes('copy /Y "C:\\Temp\\OrbitHUD-Windows-Portable.exe" "D:\\Tools\\OrbitHUD.exe"'));
+  assert.ok(winPortableScript.includes('start "" "D:\\Tools\\OrbitHUD.exe"'));
+
+  const linuxScript = buildLinuxAppImageUpdateScript({
+    downloadedPath: "/tmp/OrbitHUD-Linux-x86_64.AppImage",
+    appImageTarget: "/home/dev/Apps/OrbitHUD.AppImage",
+    pid: 9876,
+    shPath: "/tmp/update.sh",
+  });
+  assert.ok(linuxScript.includes("while kill -0 9876 2>/dev/null"));
+  assert.ok(linuxScript.includes('nohup "/home/dev/Apps/OrbitHUD.AppImage" >/dev/null 2>&1 </dev/null &'));
+
+  const macScript = buildMacZipUpdateScript({
+    downloadedPath: "/tmp/OrbitHUD-macOS.zip",
+    extractDir: "/tmp/extract",
+    pid: 4321,
+    shPath: "/tmp/update-mac.sh",
+  });
+  assert.ok(macScript.includes("while kill -0 4321 2>/dev/null"));
+  assert.ok(macScript.includes('open -n "/Applications/OrbitHUD.app"'));
+  console.log("  ✓ Auto-Updater relaunch scripts (Windows NSIS/Portable, Linux, macOS) passed");
 
   console.log("✅ All cross-platform tests passed!");
 })().catch((err) => {

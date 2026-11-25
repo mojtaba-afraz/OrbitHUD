@@ -572,9 +572,12 @@ async function startAutoUpdateDownload() {
     sendStateToRenderer();
     updateTrayMenu();
 
-    const result = installDownloadedUpdate(destPath);
+    const result = installDownloadedUpdate(destPath, process.platform, process.env, {
+      execPath: process.execPath,
+      pid: process.pid,
+    });
     if (result && result.relaunching) {
-      setTimeout(() => app.quit(), 400);
+      setTimeout(() => app.quit(), 250);
     } else if (result && result.openPath) {
       await shell.openPath(result.openPath);
     } else if (updateState.releaseUrl) {
