@@ -1,6 +1,6 @@
 {
   "name": "orbithud",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "OrbitHUD — Zero-Gravity Glassmorphic AI Usage & Quota HUD for Google Antigravity, Claude Code, and OpenAI Codex CLI (macOS, Windows, Linux)",
   "main": "src/main.js",
   "scripts": {
