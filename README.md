@@ -117,6 +117,16 @@ npm run dist:linux
 
 ---
 
+## 🗺 Roadmap & Contributing
+
+Curious about what's coming next (macOS native auto-updater, smart quota notifications, burn-rate analytics, Cursor/Copilot providers, glass themes, and native WidgetKit)?
+
+- View the full [**Roadmap**](ROADMAP.md)
+- Browse open [**Issues**](../../issues) and [**Milestones**](../../milestones)
+- Looking to contribute? Check out issues labeled [`good first issue`](../../labels/good%20first%20issue) or [`help wanted`](../../labels/help%20wanted) and open a Pull Request!
+
+---
+
 ## 📄 License
 
 Released under the [MIT License](LICENSE).
