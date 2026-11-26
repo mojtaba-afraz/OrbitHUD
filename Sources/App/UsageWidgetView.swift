@@ -192,15 +192,16 @@ enum UsageWidgetLayout {
         }
 
         let tabsExtra: CGFloat = viewModel.enabledProviders.count > 1 ? 32 : 0
+        let updateBannerExtra: CGFloat = viewModel.isUpdateBannerVisible ? 46 : 0
         let visibleGroups = viewModel.visibleQuotaGroups
         let statusCards = viewModel.visibleStatusCards
 
         if visibleGroups.isEmpty && statusCards.isEmpty {
-            return CGSize(width: 356, height: 112 + tabsExtra)
+            return CGSize(width: 356, height: 112 + tabsExtra + updateBannerExtra)
         }
 
         // Outer vertical padding (26) + header (22) + spacing (9)
-        var height: CGFloat = 57 + tabsExtra
+        var height: CGFloat = 57 + tabsExtra + updateBannerExtra
         for (idx, group) in visibleGroups.enumerated() {
             height += group.buckets.count >= 2 ? 78 : 70
             if idx > 0 { height += 9 }
@@ -684,6 +685,9 @@ struct UsageWidgetView: View {
             } else {
                 VStack(alignment: .leading, spacing: 9) {
                     headerBar
+                    if viewModel.isUpdateBannerVisible {
+                        UpdateBannerView(viewModel: viewModel)
+                    }
                     if viewModel.enabledProviders.count > 1 {
                         ProviderFilterBarView(viewModel: viewModel)
                     }

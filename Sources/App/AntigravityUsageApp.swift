@@ -159,6 +159,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = appIcon
             NSWorkspace.shared.setIcon(appIcon, forFile: Bundle.main.bundlePath, options: [])
         }
+        viewModel.onRequestAppTerminate = {
+            NSApplication.shared.terminate(nil)
+        }
         windowManager = WidgetWindowManager(viewModel: viewModel)
     }
 }

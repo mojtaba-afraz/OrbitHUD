@@ -41,6 +41,11 @@ struct MenuBarControlView: View {
                 .controlSize(.small)
             }
 
+            // Update Banner (when available / downloading / error)
+            if viewModel.isUpdateBannerVisible {
+                UpdateBannerView(viewModel: viewModel)
+            }
+
             // Full Usage Bento Cards (Dynamic models)
             if viewModel.enabledProviders.count > 1 {
                 ProviderFilterBarView(viewModel: viewModel)
@@ -152,10 +157,41 @@ struct MenuBarControlView: View {
 
             Divider().overlay(Color.white.opacity(0.12))
 
-            HStack {
-                Text("Today: \(TokenFormatter.format(viewModel.snapshot.tokenUsage.todayTotalTokens)) tokens")
-                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                    .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Today: \(TokenFormatter.format(viewModel.snapshot.tokenUsage.todayTotalTokens)) tokens")
+                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+
+                    HStack(spacing: 6) {
+                        Text("v\(viewModel.currentAppVersion)")
+                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                            .foregroundColor(.secondary.opacity(0.75))
+
+                        Button {
+                            Task { await viewModel.checkForUpdates(userInitiated: true) }
+                        } label: {
+                            switch viewModel.updateState {
+                            case .checking:
+                                Text("Checking...")
+                            case .upToDate:
+                                Text("Up to date")
+                            default:
+                                Text("Check for Updates")
+                            }
+                        }
+                        .buttonStyle(.link)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .disabled({
+                            switch viewModel.updateState {
+                            case .checking, .downloading, .verifying, .installing:
+                                return true
+                            default:
+                                return false
+                            }
+                        }())
+                    }
+                }
                 Spacer()
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)

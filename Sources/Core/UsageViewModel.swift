@@ -59,6 +59,31 @@ public final class UsageViewModel: ObservableObject {
     @Published public var isWidgetHovered: Bool = false
     @Published public var hoveredCardId: String? = nil
     @Published public private(set) var launchAtLogin: Bool = false
+    @Published public var updateState: UpdateState = .idle {
+        didSet {
+            if oldValue.isBannerRelevant != updateState.isBannerRelevant {
+                onWindowConfigChanged?()
+            }
+        }
+    }
+    @Published public var isUpdateBannerDismissed: Bool = false {
+        didSet {
+            if oldValue != isUpdateBannerDismissed {
+                onWindowConfigChanged?()
+            }
+        }
+    }
+
+    public var isUpdateBannerVisible: Bool {
+        !isUpdateBannerDismissed && updateState.isBannerRelevant
+    }
+
+    public var currentAppVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0.0.0"
+    }
+
+    public var onRequestAppTerminate: (() -> Void)?
 
     public var orderedEnabledProviders: [QuotaProviderID] {
         QuotaProviderID.allCases.filter { enabledProviders.contains($0) }
@@ -162,6 +187,9 @@ public final class UsageViewModel: ObservableObject {
     private let codexFetcher = CodexQuotaFetcher()
     private let transcriptAggregator = TranscriptUsageAggregator()
     private var refreshTimer: Timer?
+    private var updateCheckTimer: Timer?
+    private var initialUpdateCheckWorkItem: DispatchWorkItem?
+    private var latestAvailableUpdate: UpdateReleaseInfo?
     private var activeTimerInterval: TimeInterval = 0
     private var consecutiveAgyDisconnects: Int = 0
     private var pendingRefresh: Bool = false
@@ -206,6 +234,7 @@ public final class UsageViewModel: ObservableObject {
 
         restartTimer()
         setupAuthAndDaemonWatchers()
+        scheduleAutomaticUpdateChecks()
         Task {
             await refreshNow()
         }
@@ -213,10 +242,130 @@ public final class UsageViewModel: ObservableObject {
 
     deinit {
         refreshTimer?.invalidate()
+        updateCheckTimer?.invalidate()
+        initialUpdateCheckWorkItem?.cancel()
         watcherDebounceWorkItem?.cancel()
         for source in watcherSources {
             source.cancel()
         }
+    }
+
+    // MARK: - Auto-Updater
+
+    private func scheduleAutomaticUpdateChecks() {
+        let initialWork = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.checkForUpdates(userInitiated: false)
+            }
+        }
+        initialUpdateCheckWorkItem = initialWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: initialWork)
+
+        updateCheckTimer?.invalidate()
+        updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.checkForUpdates(userInitiated: false)
+            }
+        }
+    }
+
+    public func checkForUpdates(userInitiated: Bool = false) async {
+        switch updateState {
+        case .checking, .downloading, .verifying, .installing:
+            return
+        default:
+            break
+        }
+
+        if userInitiated {
+            isUpdateBannerDismissed = false
+            updateState = .checking
+        }
+
+        do {
+            if let release = try await AutoUpdater.checkForUpdate(currentVersion: currentAppVersion) {
+                if latestAvailableUpdate?.latestVersion != release.latestVersion {
+                    isUpdateBannerDismissed = false
+                }
+                latestAvailableUpdate = release
+                updateState = .available(release)
+            } else {
+                latestAvailableUpdate = nil
+                if userInitiated {
+                    updateState = .upToDate(version: currentAppVersion)
+                } else {
+                    updateState = .idle
+                }
+            }
+        } catch {
+            if userInitiated {
+                updateState = .error(
+                    message: error.localizedDescription,
+                    releaseURL: AutoUpdater.fallbackReleasePageURL
+                )
+            }
+        }
+    }
+
+    public func installAvailableUpdate() async {
+        let release: UpdateReleaseInfo? = {
+            if case .available(let info) = updateState { return info }
+            return latestAvailableUpdate
+        }()
+        guard let release else { return }
+
+        isUpdateBannerDismissed = false
+        updateState = .downloading(version: release.latestVersion, progress: 0)
+
+        let downloadDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("orbithud-download-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        let destinationURL = downloadDir.appendingPathComponent(release.asset.name)
+
+        do {
+            let downloadedURL = try await AutoUpdater.downloadAsset(
+                from: release.asset.downloadURL,
+                to: destinationURL
+            ) { [weak self] pct in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if case .downloading(let ver, _) = self.updateState {
+                        self.updateState = .downloading(version: ver, progress: pct)
+                    }
+                }
+            }
+
+            updateState = .verifying(version: release.latestVersion)
+
+            guard let checksumAsset = release.checksumAsset else {
+                try? FileManager.default.removeItem(at: downloadedURL)
+                throw AutoUpdaterError.missingChecksumAsset
+            }
+
+            let sumsText = try await AutoUpdater.fetchText(from: checksumAsset.downloadURL)
+            let sums = AutoUpdater.parseSha256Sums(sumsText)
+            guard let expectedHash = sums[release.asset.name] else {
+                try? FileManager.default.removeItem(at: downloadedURL)
+                throw AutoUpdaterError.missingChecksumEntry(release.asset.name)
+            }
+
+            try AutoUpdater.verifyFileSha256(at: downloadedURL, expectedHash: expectedHash)
+
+            updateState = .installing(version: release.latestVersion)
+            try AutoUpdater.launchDetachedMacOSInstaller(downloadedZipURL: downloadedURL)
+            onRequestAppTerminate?()
+        } catch {
+            try? FileManager.default.removeItem(at: downloadDir)
+            updateState = .error(
+                message: error.localizedDescription,
+                releaseURL: release.releaseURL
+            )
+        }
+    }
+
+    public func dismissUpdateBanner() {
+        isUpdateBannerDismissed = true
     }
 
     public func setSingleMode(_ mode: WidgetDisplayMode) {

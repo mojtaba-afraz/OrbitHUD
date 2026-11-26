@@ -323,4 +323,118 @@ final class UsageCoreTests: XCTestCase {
         let second = aggregator.collectUsageSummary(referenceDate: refDate)
         XCTAssertEqual(second, first)
     }
+
+    // MARK: - AutoUpdater
+
+    func testAutoUpdaterSemverComparison() {
+        XCTAssertEqual(AutoUpdater.parseSemver("v1.2.5").0, 1)
+        XCTAssertEqual(AutoUpdater.parseSemver("v1.2.5").1, 2)
+        XCTAssertEqual(AutoUpdater.parseSemver("v1.2.5").2, 5)
+        XCTAssertEqual(AutoUpdater.parseSemver("1.3.0-beta.1").1, 3)
+
+        XCTAssertGreaterThan(AutoUpdater.compareSemver("v1.2.6", "1.2.5"), 0)
+        XCTAssertGreaterThan(AutoUpdater.compareSemver("1.10.0", "1.2.9"), 0)
+        XCTAssertGreaterThan(AutoUpdater.compareSemver("2.0.0", "1.9.9"), 0)
+        XCTAssertEqual(AutoUpdater.compareSemver("v1.2.5", "1.2.5"), 0)
+        XCTAssertLessThan(AutoUpdater.compareSemver("1.2.4", "1.2.5"), 0)
+    }
+
+    func testAutoUpdaterAssetAndChecksumSelection() {
+        let dmg = UpdateAssetInfo(name: "OrbitHUD-macOS.dmg", downloadURL: URL(string: "https://example.com/a.dmg")!)
+        let zip = UpdateAssetInfo(name: "OrbitHUD-macOS.zip", downloadURL: URL(string: "https://example.com/a.zip")!)
+        let exe = UpdateAssetInfo(name: "OrbitHUD-Windows-Setup.exe", downloadURL: URL(string: "https://example.com/a.exe")!)
+        let sums = UpdateAssetInfo(name: "SHA256SUMS.txt", downloadURL: URL(string: "https://example.com/SHA256SUMS.txt")!)
+
+        XCTAssertEqual(AutoUpdater.selectMacOSAsset(from: [dmg, exe, zip, sums]), zip)
+        XCTAssertEqual(AutoUpdater.selectChecksumAsset(from: [dmg, exe, zip, sums]), sums)
+        XCTAssertNil(AutoUpdater.selectMacOSAsset(from: [dmg, exe, sums]))
+        XCTAssertNil(AutoUpdater.selectChecksumAsset(from: [dmg, exe, zip]))
+    }
+
+    func testAutoUpdaterParseSha256Sums() {
+        let validA = String(repeating: "a", count: 64)
+        let validB = String(repeating: "B", count: 64)
+        let text = """
+        # Release checksums
+        \(validA)  OrbitHUD-macOS.zip
+        \(validB) *./dist/OrbitHUD-Windows-Setup.exe
+        not-a-hash  ignored.bin
+        """
+        let parsed = AutoUpdater.parseSha256Sums(text)
+        XCTAssertEqual(parsed["OrbitHUD-macOS.zip"], validA)
+        XCTAssertEqual(parsed["OrbitHUD-Windows-Setup.exe"], validB.lowercased())
+        XCTAssertNil(parsed["ignored.bin"])
+    }
+
+    func testAutoUpdaterVerifyFileSha256() throws {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("orbithud-sha-test-\(UUID().uuidString)")
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        // Known SHA256 of "hello orbit"
+        let payload = Data("hello orbit".utf8)
+        let validFile = tempDir.appendingPathComponent("valid.zip")
+        try payload.write(to: validFile)
+        let expected = try AutoUpdater.computeFileSha256(at: validFile)
+        XCTAssertEqual(expected.count, 64)
+
+        // Matching hash succeeds and keeps file
+        let verified = try AutoUpdater.verifyFileSha256(at: validFile, expectedHash: expected.uppercased())
+        XCTAssertEqual(verified, expected)
+        XCTAssertTrue(fm.fileExists(atPath: validFile.path))
+
+        // Mismatched hash throws and deletes file
+        let badFile = tempDir.appendingPathComponent("tampered.zip")
+        try payload.write(to: badFile)
+        let wrongHash = String(repeating: "0", count: 64)
+        XCTAssertThrowsError(try AutoUpdater.verifyFileSha256(at: badFile, expectedHash: wrongHash)) { err in
+            if case AutoUpdaterError.checksumMismatch = err {
+                // expected
+            } else {
+                XCTFail("Expected checksumMismatch, got \(err)")
+            }
+        }
+        XCTAssertFalse(fm.fileExists(atPath: badFile.path))
+
+        // Invalid hash format throws and deletes file
+        let invalidFmtFile = tempDir.appendingPathComponent("invalidfmt.zip")
+        try payload.write(to: invalidFmtFile)
+        XCTAssertThrowsError(try AutoUpdater.verifyFileSha256(at: invalidFmtFile, expectedHash: "xyz")) { err in
+            XCTAssertEqual(err as? AutoUpdaterError, .invalidChecksumFormat)
+        }
+        XCTAssertFalse(fm.fileExists(atPath: invalidFmtFile.path))
+    }
+
+    func testAutoUpdaterBuildMacOSInstallScript() {
+        let script = AutoUpdater.buildMacOSInstallScript(
+            downloadedZipPath: "/tmp/my dir/Orbit's.zip",
+            extractDir: "/tmp/extract 1",
+            targetAppPath: "/Applications/OrbitHUD.app",
+            pid: 4242,
+            scriptPath: "/tmp/update.sh"
+        )
+        XCTAssertTrue(script.hasPrefix("#!/bin/sh\n"))
+        XCTAssertTrue(script.contains("while kill -0 4242"))
+        XCTAssertTrue(script.contains("ditto -xk '/tmp/my dir/Orbit'\\''s.zip' '/tmp/extract 1'"))
+        XCTAssertTrue(script.contains("mv '/Applications/OrbitHUD.app' '/Applications/OrbitHUD.app.backup'"))
+        XCTAssertTrue(script.contains("open -n '/Applications/OrbitHUD.app'"))
+        XCTAssertTrue(script.contains("xattr -dr com.apple.quarantine"))
+    }
+
+    func testAutoUpdaterResolveTargetAppBundlePath() throws {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("orbithud-bundle-test-\(UUID().uuidString)")
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        let writableApp = tempDir.appendingPathComponent("OrbitHUD.app")
+        XCTAssertEqual(AutoUpdater.resolveTargetAppBundlePath(bundleURL: writableApp), writableApp.path)
+
+        let dmgApp = URL(fileURLWithPath: "/Volumes/OrbitHUD/OrbitHUD.app")
+        XCTAssertEqual(AutoUpdater.resolveTargetAppBundlePath(bundleURL: dmgApp), "/Applications/OrbitHUD.app")
+
+        let nonApp = tempDir.appendingPathComponent("AntigravityUsageWidget")
+        XCTAssertEqual(AutoUpdater.resolveTargetAppBundlePath(bundleURL: nonApp), "/Applications/OrbitHUD.app")
+    }
 }

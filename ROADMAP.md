@@ -19,7 +19,7 @@ Focus: Full parity between native macOS and Windows/Linux, plus proactive alerts
 
 | Status | Feature | Platforms | Issue |
 | :---: | :--- | :--- | :---: |
-| ⬜ | **Native macOS Auto-Updater** via GitHub Releases with SHA256 verification | macOS | [#1](https://github.com/mojtaba-afraz/OrbitHUD/issues/1) |
+| ✅ | **Native macOS Auto-Updater** via GitHub Releases with SHA256 verification | macOS | [#1](https://github.com/mojtaba-afraz/OrbitHUD/issues/1) |
 | ⬜ | **Refresh Interval control in Settings UI** (`15s`, `30s`, `60s`, `2m`, `5m`) | macOS, Win/Linux | [#2](https://github.com/mojtaba-afraz/OrbitHUD/issues/2) |
 | ⬜ | **Configurable Primary Quota Model** in Menu Bar & System Tray (Auto Lowest or Pinned Model) | macOS, Win/Linux | [#3](https://github.com/mojtaba-afraz/OrbitHUD/issues/3) |
 | ⬜ | **Smart Quota Alerts & Reset Notifications** (low-quota threshold & 5h window reset alerts) | macOS, Win/Linux | [#4](https://github.com/mojtaba-afraz/OrbitHUD/issues/4) |
