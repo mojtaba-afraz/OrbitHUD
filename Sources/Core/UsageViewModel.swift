@@ -59,6 +59,26 @@ public final class UsageViewModel: ObservableObject {
     @Published public var isWidgetHovered: Bool = false
     @Published public var hoveredCardId: String? = nil
     @Published public private(set) var launchAtLogin: Bool = false
+    @Published public var quotaAlertsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(quotaAlertsEnabled, forKey: "quotaAlertsEnabled_v1")
+            if quotaAlertsEnabled {
+                onQuotaAlertsEnabled?()
+            } else {
+                alertEvaluator.reset()
+            }
+        }
+    }
+    @Published public var lowQuotaAlertThreshold: Int {
+        didSet {
+            UserDefaults.standard.set(lowQuotaAlertThreshold, forKey: "lowQuotaAlertThreshold_v1")
+        }
+    }
+    @Published public var notifyOnQuotaReset: Bool {
+        didSet {
+            UserDefaults.standard.set(notifyOnQuotaReset, forKey: "notifyOnQuotaReset_v1")
+        }
+    }
     @Published public var updateState: UpdateState = .idle {
         didSet {
             if oldValue.isBannerRelevant != updateState.isBannerRelevant {
@@ -84,6 +104,8 @@ public final class UsageViewModel: ObservableObject {
     }
 
     public var onRequestAppTerminate: (() -> Void)?
+    public var onQuotaAlertsEnabled: (() -> Void)?
+    public var onQuotaAlertsTriggered: (([QuotaAlertEvent]) -> Void)?
 
     public var orderedEnabledProviders: [QuotaProviderID] {
         QuotaProviderID.allCases.filter { enabledProviders.contains($0) }
@@ -186,6 +208,7 @@ public final class UsageViewModel: ObservableObject {
     private let claudeFetcher = ClaudeCodeQuotaFetcher()
     private let codexFetcher = CodexQuotaFetcher()
     private let transcriptAggregator = TranscriptUsageAggregator()
+    private let alertEvaluator = QuotaAlertEvaluator()
     private var refreshTimer: Timer?
     private var updateCheckTimer: Timer?
     private var initialUpdateCheckWorkItem: DispatchWorkItem?
@@ -231,6 +254,14 @@ public final class UsageViewModel: ObservableObject {
         }
 
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
+        self.quotaAlertsEnabled = UserDefaults.standard.bool(forKey: "quotaAlertsEnabled_v1")
+        let savedThreshold = UserDefaults.standard.integer(forKey: "lowQuotaAlertThreshold_v1")
+        self.lowQuotaAlertThreshold = QuotaAlertConfig.thresholdPresets.contains(savedThreshold) ? savedThreshold : 20
+        if UserDefaults.standard.object(forKey: "notifyOnQuotaReset_v1") != nil {
+            self.notifyOnQuotaReset = UserDefaults.standard.bool(forKey: "notifyOnQuotaReset_v1")
+        } else {
+            self.notifyOnQuotaReset = true
+        }
 
         restartTimer()
         setupAuthAndDaemonWatchers()
@@ -585,6 +616,22 @@ public final class UsageViewModel: ObservableObject {
         )
         self.snapshot = newSnapshot
         SharedSnapshotStorage.save(newSnapshot)
+
+        let alertableGroups = mergedGroups.filter { group in
+            guard !hiddenGroupIds.contains(group.id) else { return false }
+            guard let pid = QuotaProviderID(rawValue: group.providerId),
+                  enabledProviders.contains(pid) else { return false }
+            return true
+        }
+        let alertConfig = QuotaAlertConfig(
+            enabled: quotaAlertsEnabled,
+            lowThresholdPercent: lowQuotaAlertThreshold,
+            notifyOnReset: notifyOnQuotaReset
+        )
+        let triggeredAlerts = alertEvaluator.evaluate(groups: alertableGroups, config: alertConfig, now: now)
+        if !triggeredAlerts.isEmpty {
+            onQuotaAlertsTriggered?(triggeredAlerts)
+        }
 
         updateAdaptivePollingInterval()
 

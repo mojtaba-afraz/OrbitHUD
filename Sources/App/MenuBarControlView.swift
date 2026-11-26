@@ -143,6 +143,34 @@ struct MenuBarControlView: View {
                 )
                 .font(.system(size: 11, design: .rounded))
 
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Smart Quota Alerts", isOn: $viewModel.quotaAlertsEnabled)
+                        .font(.system(size: 11, design: .rounded))
+
+                    if viewModel.quotaAlertsEnabled {
+                        HStack(spacing: 8) {
+                            Text("Low at")
+                                .font(.system(size: 10.5, design: .rounded))
+                                .foregroundColor(.secondary)
+
+                            Picker("Threshold", selection: $viewModel.lowQuotaAlertThreshold) {
+                                ForEach(QuotaAlertConfig.thresholdPresets, id: \.self) { pct in
+                                    Text("\(pct)%").tag(pct)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 68)
+                            .controlSize(.small)
+
+                            Spacer()
+
+                            Toggle("Reset (100%)", isOn: $viewModel.notifyOnQuotaReset)
+                                .font(.system(size: 10.5, design: .rounded))
+                        }
+                        .padding(.leading, 18)
+                    }
+                }
+
                 HStack(spacing: 8) {
                     Text("Opacity")
                         .font(.system(size: 11, design: .rounded))

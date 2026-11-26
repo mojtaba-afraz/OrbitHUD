@@ -5,6 +5,7 @@ const {
   BrowserWindow,
   Tray,
   Menu,
+  Notification,
   ipcMain,
   screen,
   nativeImage,
@@ -25,8 +26,10 @@ const {
   verifyFileSha256,
 } = require("./autoUpdater");
 const { resolveWindowPosition } = require("./windowBounds");
+const { QuotaAlertEvaluator, THRESHOLD_PRESETS } = require("./quotaAlerts");
 
 const providerManager = new ProviderManager();
+const quotaAlertEvaluator = new QuotaAlertEvaluator();
 
 let widgetWindow = null;
 let tray = null;
@@ -68,6 +71,9 @@ const DEFAULT_STATE = {
   enabledProviders: ["antigravity"],
   activeProviderFilter: "all",
   hiddenGroupIds: [],
+  alertsEnabled: false,
+  lowQuotaThreshold: 20,
+  notifyOnReset: true,
   lastQuotaData: null,
 };
 
@@ -94,6 +100,11 @@ function loadState() {
     ) {
       merged.activeProviderFilter = "all";
     }
+    merged.alertsEnabled = Boolean(merged.alertsEnabled);
+    merged.lowQuotaThreshold = THRESHOLD_PRESETS.includes(merged.lowQuotaThreshold)
+      ? merged.lowQuotaThreshold
+      : 20;
+    merged.notifyOnReset = merged.notifyOnReset !== false;
     return merged;
   } catch {
     return { ...DEFAULT_STATE };
@@ -708,6 +719,35 @@ async function refreshQuota(force = false) {
         }
 
         state.lastQuotaData = merged;
+
+        // Evaluate Smart Quota Alerts for all enabled & non-hidden models
+        const hiddenSetForAlerts = new Set(state.hiddenGroupIds || []);
+        const alertableGroups = (merged.groups || []).filter((g) => {
+          if (hiddenSetForAlerts.has(g.id)) return false;
+          const pid = g.providerId || "antigravity";
+          return state.enabledProviders.includes(pid);
+        });
+        const alertEvents = quotaAlertEvaluator.evaluate(alertableGroups, {
+          enabled: state.alertsEnabled,
+          lowThresholdPercent: state.lowQuotaThreshold,
+          notifyOnReset: state.notifyOnReset,
+        });
+        if (alertEvents.length > 0 && Notification.isSupported()) {
+          const iconImg = getAppIconImage();
+          for (const ev of alertEvents) {
+            try {
+              const notif = new Notification({
+                title: ev.title,
+                body: ev.body,
+                icon: iconImg.isEmpty() ? undefined : iconImg,
+              });
+              notif.show();
+            } catch {
+              // ignore OS notification delivery errors
+            }
+          }
+        }
+
         const newStatusKey = JSON.stringify(merged.providerStatuses || {});
         if ((merged.groups?.length || 0) !== prevCount || newStatusKey !== prevStatusKey) {
           measuredBentoHeight = null;
@@ -861,6 +901,48 @@ function buildControlMenuTemplate() {
       },
     },
     {
+      label: "Smart Quota Alerts",
+      submenu: [
+        {
+          label: "Enable Quota Alerts",
+          type: "checkbox",
+          checked: Boolean(state.alertsEnabled),
+          click: () => {
+            state.alertsEnabled = !state.alertsEnabled;
+            if (!state.alertsEnabled) {
+              quotaAlertEvaluator.reset();
+            }
+            saveState();
+            updateTrayMenu();
+          },
+        },
+        { type: "separator" },
+        {
+          label: "Low Quota Threshold",
+          submenu: THRESHOLD_PRESETS.map((pct) => ({
+            label: `${pct}%`,
+            type: "radio",
+            checked: state.lowQuotaThreshold === pct,
+            click: () => {
+              state.lowQuotaThreshold = pct;
+              saveState();
+              updateTrayMenu();
+            },
+          })),
+        },
+        {
+          label: "Notify on Quota Reset (100%)",
+          type: "checkbox",
+          checked: state.notifyOnReset !== false,
+          click: () => {
+            state.notifyOnReset = !state.notifyOnReset;
+            saveState();
+            updateTrayMenu();
+          },
+        },
+      ],
+    },
+    {
       label: "Window Opacity",
       submenu: [1.0, 0.95, 0.85, 0.75, 0.65].map((op) => ({
         label: `${Math.round(op * 100)}%`,
@@ -1010,6 +1092,9 @@ ipcMain.on("widget:dismiss-update", () => {
 });
 
 app.whenReady().then(() => {
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.orbithud.antigravity");
+  }
   if (process.platform === "darwin" && app.dock) {
     app.dock.hide();
   }

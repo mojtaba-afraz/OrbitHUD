@@ -150,6 +150,7 @@ struct MenuBarLiveLabelView: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let viewModel = UsageViewModel()
+    let notificationManager = QuotaNotificationManager()
     var windowManager: WidgetWindowManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -161,6 +162,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         viewModel.onRequestAppTerminate = {
             NSApplication.shared.terminate(nil)
+        }
+        viewModel.onQuotaAlertsEnabled = { [weak self] in
+            self?.notificationManager.requestAuthorizationIfNeeded()
+        }
+        viewModel.onQuotaAlertsTriggered = { [weak self] events in
+            self?.notificationManager.deliver(events)
+        }
+        if viewModel.quotaAlertsEnabled {
+            notificationManager.requestAuthorizationIfNeeded()
         }
         windowManager = WidgetWindowManager(viewModel: viewModel)
     }

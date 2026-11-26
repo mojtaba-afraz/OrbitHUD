@@ -437,4 +437,95 @@ final class UsageCoreTests: XCTestCase {
         let nonApp = tempDir.appendingPathComponent("AntigravityUsageWidget")
         XCTAssertEqual(AutoUpdater.resolveTargetAppBundlePath(bundleURL: nonApp), "/Applications/OrbitHUD.app")
     }
+
+    // MARK: - QuotaAlertEvaluator
+
+    func testQuotaAlertLowCrossingDeduplicationAndReset() {
+        let iso = ISO8601DateFormatter()
+        let now = iso.date(from: "2026-11-26T12:00:00Z")!
+        let reset1 = iso.date(from: "2026-11-26T15:00:00Z")!
+        let reset2 = iso.date(from: "2026-11-26T20:00:00Z")!
+
+        func makeGroups(pct: Double, reset: Date) -> [QuotaGroup] {
+            [
+                QuotaGroup(
+                    id: "antigravity::gemini",
+                    providerId: "antigravity",
+                    displayName: "Gemini Models",
+                    buckets: [
+                        QuotaBucket(
+                            id: "gemini-5h",
+                            displayName: "Five Hour Limit",
+                            window: "5h",
+                            remainingFraction: pct / 100.0,
+                            resetTime: reset
+                        )
+                    ]
+                )
+            ]
+        }
+
+        let evaluator = QuotaAlertEvaluator()
+        let config = QuotaAlertConfig(enabled: true, lowThresholdPercent: 20, notifyOnReset: true)
+
+        // Seed at 50% -> no alert
+        XCTAssertTrue(evaluator.evaluate(groups: makeGroups(pct: 50, reset: reset1), config: config, now: now).isEmpty)
+
+        // Cross below 20% -> fires once
+        let low1 = evaluator.evaluate(groups: makeGroups(pct: 18, reset: reset1), config: config, now: now)
+        XCTAssertEqual(low1.count, 1)
+        XCTAssertEqual(low1[0].kind, .lowQuota)
+        XCTAssertTrue(low1[0].title.contains("Gemini Models"))
+        XCTAssertTrue(low1[0].body.contains("18% remaining"))
+
+        // Further drops in same cycle -> suppressed
+        XCTAssertTrue(evaluator.evaluate(groups: makeGroups(pct: 12, reset: reset1), config: config, now: now).isEmpty)
+        XCTAssertTrue(evaluator.evaluate(groups: makeGroups(pct: 0, reset: reset1), config: config, now: now).isEmpty)
+
+        // Reset to 100% -> fires quotaReset once
+        let resetEvents = evaluator.evaluate(groups: makeGroups(pct: 100, reset: reset2), config: config, now: now)
+        XCTAssertEqual(resetEvents.count, 1)
+        XCTAssertEqual(resetEvents[0].kind, .quotaReset)
+
+        // Staying at 100% -> no duplicate
+        XCTAssertTrue(evaluator.evaluate(groups: makeGroups(pct: 100, reset: reset2), config: config, now: now).isEmpty)
+
+        // Dropping below threshold in new cycle -> fires lowQuota again
+        let low2 = evaluator.evaluate(groups: makeGroups(pct: 15, reset: reset2), config: config, now: now)
+        XCTAssertEqual(low2.count, 1)
+        XCTAssertEqual(low2[0].kind, .lowQuota)
+    }
+
+    func testQuotaAlertSeedWhileLowAndOptInFlags() {
+        func makeGroups(pct: Double) -> [QuotaGroup] {
+            [
+                QuotaGroup(
+                    id: "claude-code::primary",
+                    providerId: "claude-code",
+                    displayName: "Claude Code",
+                    buckets: [
+                        QuotaBucket(id: "5h", displayName: "5h", window: "5h", remainingFraction: pct / 100.0)
+                    ]
+                )
+            ]
+        }
+
+        // Seed while already low (8%) -> no launch spam, but reset to 100% notifies
+        let evaluator = QuotaAlertEvaluator()
+        let enabledCfg = QuotaAlertConfig(enabled: true, lowThresholdPercent: 20, notifyOnReset: true)
+        XCTAssertTrue(evaluator.evaluate(groups: makeGroups(pct: 8), config: enabledCfg).isEmpty)
+        let resetEv = evaluator.evaluate(groups: makeGroups(pct: 100), config: enabledCfg)
+        XCTAssertEqual(resetEv.count, 1)
+        XCTAssertEqual(resetEv[0].kind, .quotaReset)
+
+        // Disabled alerts produce zero events
+        let disabledCfg = QuotaAlertConfig(enabled: false, lowThresholdPercent: 20, notifyOnReset: true)
+        XCTAssertTrue(evaluator.evaluate(groups: makeGroups(pct: 10), config: disabledCfg).isEmpty)
+        XCTAssertTrue(evaluator.evaluate(groups: makeGroups(pct: 100), config: disabledCfg).isEmpty)
+
+        // notifyOnReset = false suppresses reset alert while keeping low alert
+        let noResetCfg = QuotaAlertConfig(enabled: true, lowThresholdPercent: 20, notifyOnReset: false)
+        XCTAssertEqual(evaluator.evaluate(groups: makeGroups(pct: 10), config: noResetCfg).count, 1)
+        XCTAssertTrue(evaluator.evaluate(groups: makeGroups(pct: 100), config: noResetCfg).isEmpty)
+    }
 }
