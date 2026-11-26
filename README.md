@@ -1,22 +1,26 @@
 <div align="center">
-  <img src="assets/logo.png" alt="OrbitHUD Logo" width="150" height="150" />
+  <img src="assets/logo.png" alt="OrbitHUD Logo" width="124" height="124" />
 
   <h1>OrbitHUD</h1>
-  <p><strong>Zero-Gravity Glassmorphic AI Usage & Quota HUD for Google Antigravity, Claude Code & Codex CLI</strong></p>
+  <p><strong>Never hit a 5-hour AI rate limit mid-flow again.</strong></p>
+  <p>
+    A native <strong>macOS (SwiftUI)</strong> &amp; cross-platform (<strong>Windows / Linux</strong>) glassmorphic desktop HUD that tracks your live <strong>Google Antigravity</strong>, <strong>Claude Code</strong>, and <strong>OpenAI Codex CLI</strong> quotas — with proactive smart alerts, SHA256-verified auto-updates, and zero telemetry.
+  </p>
 
   <p>
-    <a href="../../releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20(.dmg%20%2F%20.zip)-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
-    <a href="../../releases/latest"><img src="https://img.shields.io/badge/Download-Windows%20(.exe)-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
-    <a href="../../releases/latest"><img src="https://img.shields.io/badge/Download-Linux%20(.AppImage%20%2F%20.deb)-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>
+    <a href="https://mojtaba-afraz.github.io/OrbitHUD/"><img src="https://img.shields.io/badge/Website-Live%20Preview-3DDB94?style=for-the-badge&logo=googlechrome&logoColor=07090F" alt="Website & Interactive Preview" /></a>
+    <a href="../../releases/latest/download/OrbitHUD-macOS.dmg"><img src="https://img.shields.io/badge/macOS-Native%20SwiftUI-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+    <a href="../../releases/latest/download/OrbitHUD-Windows-Setup.exe"><img src="https://img.shields.io/badge/Windows-.exe%20Installer-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+    <a href="../../releases/latest/download/OrbitHUD-Linux-x86_64.AppImage"><img src="https://img.shields.io/badge/Linux-AppImage%20%2F%20.deb-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>
   </p>
 
   <p>
     <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/mojtaba-afraz/OrbitHUD?style=flat-square&color=38BDF8&label=Release" alt="Latest Release" /></a>
     <a href="../../releases"><img src="https://img.shields.io/github/downloads/mojtaba-afraz/OrbitHUD/total?style=flat-square&color=3DDB94&label=Downloads" alt="Total Downloads" /></a>
     <a href="../../releases/latest"><img src="https://img.shields.io/github/downloads/mojtaba-afraz/OrbitHUD/latest/total?style=flat-square&color=22D3EE&label=Latest%20Downloads" alt="Latest Release Downloads" /></a>
-    <img src="https://img.shields.io/badge/Providers-Antigravity%20%7C%20Claude%20Code%20%7C%20Codex-E8926B?style=flat-square" alt="Providers" />
-    <img src="https://img.shields.io/badge/License-MIT-3DDB94?style=flat-square" alt="MIT License" />
-    <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-22D3EE?style=flat-square" alt="Platforms" />
+    <img src="https://img.shields.io/badge/Providers-Antigravity%20%7C%20Claude%20Code%20%7C%20Codex-E8926B?style=flat-square" alt="Supported Providers" />
+    <img src="https://img.shields.io/badge/Telemetry-Zero-3DDB94?style=flat-square" alt="Zero Telemetry" />
+    <img src="https://img.shields.io/badge/License-MIT-38BDF8?style=flat-square" alt="MIT License" />
   </p>
 </div>
 
@@ -24,48 +28,59 @@
 
 <div align="center">
   <img src="assets/orbithud-showcase.png" alt="OrbitHUD Glassmorphism Bento & Compact Pill Showcase" width="100%" />
+  <br />
+  <sub><strong>Full Bento Glass View</strong> &amp; <strong>52px Compact Coding Pill</strong> — live 5h &amp; weekly gauges across Antigravity, Claude Code, and Codex CLI.</sub>
 </div>
 
 ---
 
-**OrbitHUD** is a lightweight, real-time **Glassmorphism Desktop & Floating AI Usage HUD** built for **Google Antigravity** (`Antigravity IDE`, `Antigravity 2.0`, & `agy` CLI) with **opt-in Multi-Provider Mode** for **Claude Code** and **OpenAI Codex CLI**. By default, it connects locally to your Antigravity Language Server over loopback (`127.0.0.1`) with zero configuration, zero telemetry, and no API keys required.
+## ⚡ Why OrbitHUD?
+
+Coding with AI agents is effortless — until a silent 5-hour quota wall interrupts you mid-refactor. OrbitHUD keeps your remaining runway visible at a glance and alerts you *before* you hit zero.
+
+| Capability | What You Get |
+| :--- | :--- |
+| **🍎 True Native macOS App** | Built in **Swift & SwiftUI** with real `NSVisualEffectView` behind-window blur — tiny RAM/CPU footprint (not an Electron wrapper on macOS). |
+| **🔔 Smart Quota Alerts & Reset Notifications** | Opt-in native OS notifications (`UNUserNotificationCenter` / Electron `Notification`) when any visible bucket drops below your threshold (`20%`, `15%`, `10%`, `5%`) **and** when your 5h/weekly window resets back to `100%` — with per-cycle anti-spam deduplication. |
+| **🧩 Unified Multi-Provider HUD** | Connects locally to **Google Antigravity** (`127.0.0.1`) out of the box, with opt-in support for **Claude Code** and **OpenAI Codex CLI**, segmented provider filter tabs, and instant logout / account-switch detection. |
+| **🔄 SHA256-Verified Auto-Updater** | Automatic GitHub Releases update detection, live download progress banner, fail-closed **SHA256 verification** against `SHA256SUMS.txt`, and one-click relaunch on **macOS, Windows, and Linux**. |
+| **🪟 3 Display Modes + 52px Coding Pill** | Switch between **Floating HUD** (always-on-top across spaces), **Desktop Widget** (pinned to wallpaper with position lock), and **Menu Bar / System Tray** — or collapse into a 52px Compact Pill while coding. |
+| **🛡 Built for Daily Reliability** | **Launch at Login**, **Multi-Monitor off-screen recovery**, per-model Hide/Show toggles, and live file-system watchers for zero-lag updates. |
 
 ---
 
-## 📥 Download & Install (No Build Required)
+## 📥 Quick Install
 
-Download the ready-to-use installer for your operating system from the [**Latest Releases**](../../releases/latest) page:
+### Package Managers *(Recommended)*
 
-| Operating System | Direct Download | Installation |
-| :--- | :--- | :--- |
-| **🍎 macOS** *(Apple Silicon & Intel)* | [**`OrbitHUD-macOS.dmg`**](../../releases/latest/download/OrbitHUD-macOS.dmg) / [**`OrbitHUD-macOS.zip`**](../../releases/latest/download/OrbitHUD-macOS.zip) | Open `.dmg` or extract `.zip`, drag to **Applications**, and launch *(see macOS note below)* |
-| **🪟 Windows** *(10 / 11 x64)* | [**`OrbitHUD-Windows-Setup.exe`**](../../releases/latest/download/OrbitHUD-Windows-Setup.exe) / [**`Portable.exe`**](../../releases/latest/download/OrbitHUD-Windows-Portable.exe) | Double-click `.exe` to install & launch in System Tray |
-| **🐧 Linux** *(Ubuntu / Debian / Arch / Fedora)* | [**`OrbitHUD-Linux-x86_64.AppImage`**](../../releases/latest/download/OrbitHUD-Linux-x86_64.AppImage) / [**`OrbitHUD-Linux-amd64.deb`**](../../releases/latest/download/OrbitHUD-Linux-amd64.deb) | Run `.AppImage` directly or install via `sudo dpkg -i OrbitHUD-Linux-amd64.deb` |
-
-> [!NOTE]
-> **macOS First Launch ("Apple could not verify OrbitHUD.app"):** OrbitHUD is an open-source, ad-hoc signed app without a paid Apple Developer ID certificate. If macOS Gatekeeper blocks the first launch:
-> - **Option A (System Settings):** Click **Done**, open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to OrbitHUD.
-> - **Option B (Terminal):** Run `xattr -dr com.apple.quarantine /Applications/OrbitHUD.app` — or install directly using the one-command terminal installer or Homebrew `--no-quarantine` below.
-
-### 📦 Package Managers (Homebrew, WinGet, AUR)
-
-**macOS (Homebrew Cask):**
+**🍎 macOS (Homebrew Cask):**
 ```bash
 brew tap mojtaba-afraz/tap
 brew install --cask --no-quarantine orbithud
 ```
 
-**Windows (WinGet):**
+**🪟 Windows (WinGet):**
 ```powershell
 winget install MojtabaAfraz.OrbitHUD
 ```
 
-**Arch Linux (AUR):**
+**🐧 Arch Linux (AUR):**
 ```bash
 yay -S orbithud-bin
 ```
 
-### ⚡ One-Command Terminal Install (Optional)
+### Direct Downloads
+
+| Platform | Installer | Notes |
+| :--- | :--- | :--- |
+| **🍎 macOS** *(Apple Silicon & Intel)* | [**`OrbitHUD-macOS.dmg`**](../../releases/latest/download/OrbitHUD-macOS.dmg) · [**`OrbitHUD-macOS.zip`**](../../releases/latest/download/OrbitHUD-macOS.zip) | Native Universal SwiftUI app (`macOS 13+`) |
+| **🪟 Windows** *(10 / 11 x64)* | [**`OrbitHUD-Windows-Setup.exe`**](../../releases/latest/download/OrbitHUD-Windows-Setup.exe) · [**`Portable.exe`**](../../releases/latest/download/OrbitHUD-Windows-Portable.exe) | System Tray + Floating/Desktop HUD |
+| **🐧 Linux** *(Ubuntu / Debian / Arch / Fedora)* | [**`OrbitHUD-Linux-x86_64.AppImage`**](../../releases/latest/download/OrbitHUD-Linux-x86_64.AppImage) · [**`OrbitHUD-Linux-amd64.deb`**](../../releases/latest/download/OrbitHUD-Linux-amd64.deb) | Standalone AppImage or `.deb` package |
+
+<details>
+<summary><strong>⚡ One-Command Terminal Installers &amp; macOS First-Launch Gatekeeper Note</strong></summary>
+
+<br />
 
 **macOS & Linux:**
 ```bash
@@ -77,63 +92,65 @@ curl -fsSL https://raw.githubusercontent.com/mojtaba-afraz/OrbitHUD/main/scripts
 irm https://raw.githubusercontent.com/mojtaba-afraz/OrbitHUD/main/scripts/install.ps1 | iex
 ```
 
----
-
-## ✨ Features
-
-- **True Layered Glassmorphism (Bento + Dynamic Pill):**
-  - Native behind-window wallpaper blur (`NSVisualEffectView` on macOS, `backdrop-filter` on Windows/Linux) with top-lit specular glass rims and hover-responsive Bento tiles.
-  - Switch between **Full Bento Glass View** (auto-sizing to your visible models) and an ultra-sleek **Compact Coding Pill (`52px` tall)** that takes almost zero vertical space while coding.
-- **100% Parity with Antigravity Usage Quotas:**
-  - **Gemini Models:** Live **5h limit** circular gauge + **Weekly limit** progress bar and reset countdowns (`Resets in 3h 10m`, `6d 1h`).
-  - **Claude & GPT Models:** Dedicated **5h limit** circular gauge + **Weekly limit** progress bar and reset countdowns.
-  - **Gemini 4 Argon:** Dedicated **Weekly limit** circular gauge, progress bar, and reset countdown.
-- **Optional Multi-Provider Mode (Privacy-First):**
-  - **Google Antigravity** is enabled by default via 100% local loopback (`127.0.0.1`).
-  - Optionally enable **Claude Code** (reads macOS Keychain / `~/.claude/.credentials.json`) and **OpenAI Codex CLI** (reads `~/.codex/auth.json`) from **Settings → Providers** to track all your AI coding quotas inside one unified Glassmorphic HUD with segmented provider filter tabs.
-- **Dynamic Models & Hide/Show Controls:**
-  - Automatically renders any model pool returned by Google Antigravity, Claude Code, or Codex CLI with dynamic window resizing and per-model Hide/Show toggles.
-- **3 Flexible Display Modes:**
-  - **Floating HUD (`Float`):** Always-on-top across all workspaces/desktops, draggable from anywhere on the card.
-  - **Desktop Widget (`Desktop`):** Pinned directly onto your desktop wallpaper behind normal application windows, with position lock (`Lock Desktop`).
-  - **Menu Bar / System Tray Popover:** Live percentage in your top macOS Menu Bar (or Windows/Linux System Tray) that opens the full Glassmorphic Usage Bento view on click.
-
----
-
-<details>
-<summary><strong>🛠 For Developers: Building from Source & Automated Releases</strong></summary>
-
-<br />
-
-All release installers (`.dmg`, `.zip`, `.exe`, `.AppImage`, `.deb`) are automatically built and attached to GitHub Releases by [`.github/workflows/release.yml`](.github/workflows/release.yml) whenever a new version tag (e.g. `git tag v1.0.0 && git push origin v1.0.0`) is pushed.
-
-### Local Build (Contributors)
-
-```bash
-# Build native macOS release (.zip / .dmg)
-./scripts/package_macos_release.sh
-
-# Build cross-platform packages (Windows / Linux / macOS)
-cd cross-platform
-npm install
-npm run dist:win
-npm run dist:linux
-```
+> **macOS First Launch ("Apple could not verify OrbitHUD.app"):** OrbitHUD is open-source and ad-hoc signed without a paid Apple Developer ID certificate. If Gatekeeper blocks first launch, install via Homebrew `--no-quarantine` or the terminal installer above, or run:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/OrbitHUD.app
+> ```
 
 </details>
 
 ---
 
-## 🗺 Roadmap & Contributing
+## 🔒 Privacy & Security First
 
-Curious about what's coming next (macOS native auto-updater, smart quota notifications, burn-rate analytics, Cursor/Copilot providers, glass themes, and native WidgetKit)?
+OrbitHUD is designed for developers who care deeply about what touches their credentials:
 
-- View the full [**Roadmap**](ROADMAP.md)
-- Browse open [**Issues**](../../issues) and [**Milestones**](../../milestones)
-- Looking to contribute? Check out issues labeled [`good first issue`](../../labels/good%20first%20issue) or [`help wanted`](../../labels/help%20wanted) and open a Pull Request!
+| Area | Behavior |
+| :--- | :--- |
+| **Google Antigravity (Default)** | 100% local loopback (`127.0.0.1`) to your running Antigravity Language Server. Zero external API calls, zero API keys. |
+| **Claude Code & Codex CLI (Opt-In)** | Disabled by default. When enabled in **Settings → Providers**, reads local CLI credentials (`macOS Keychain` / `~/.claude/.credentials.json` or `~/.codex/auth.json`) strictly to query official usage endpoints. |
+| **Auto-Updates** | Queries GitHub Releases (`api.github.com`) and **enforces fail-closed SHA256 verification** against `SHA256SUMS.txt` before installing — any mismatch aborts and deletes the download. |
+| **Telemetry & Tracking** | **Zero.** No analytics SDKs, no crash reporters, no third-party servers. |
 
 ---
 
-## 📄 License
+## 🗺 Roadmap & Contributing
 
-Released under the [MIT License](LICENSE).
+OrbitHUD is actively developed in the open — see what's shipped and what's next in [**ROADMAP.md**](ROADMAP.md):
+
+- ✅ **Native macOS Auto-Updater** with SHA256 verification ([#1](../../issues/1))
+- ✅ **Smart Quota Alerts & Reset Notifications** across macOS, Windows & Linux ([#4](../../issues/4))
+- ✅ **Release Download Analytics** via GitHub API, zero telemetry ([#11](../../issues/11))
+- ⬜ **Next up (`v1.3.0` / `v1.4.0`):** Refresh Interval UI ([#2](../../issues/2)), Configurable Menu Bar/Tray Primary Model ([#3](../../issues/3)), Global Hotkey ([#5](../../issues/5)), Burn-Rate & 7-Day Token Analytics Drawer ([#6](../../issues/6)), Cursor/Copilot/OpenRouter Providers ([#7](../../issues/7)), Glassmorphic Themes ([#8](../../issues/8))
+
+Want to contribute? Browse [`good first issue`](../../labels/good%20first%20issue) or [`help wanted`](../../labels/help%20wanted) and open a Pull Request!
+
+<details>
+<summary><strong>🛠 For Developers: Building from Source &amp; Running Tests</strong></summary>
+
+<br />
+
+```bash
+# Run native Swift unit tests
+swift test
+
+# Build Universal macOS .app bundle (.dmg / .zip via package_macos_release.sh)
+./scripts/build_app.sh
+
+# Run cross-platform unit tests & build Windows/Linux packages
+cd cross-platform
+npm install
+npm test
+npm run dist:win
+npm run dist:linux
+```
+
+All release installers and `SHA256SUMS.txt` are automatically built and published by [`.github/workflows/release.yml`](.github/workflows/release.yml) on every `v*.*.*` tag push.
+
+</details>
+
+---
+
+<div align="center">
+  <p>Released under the <a href="LICENSE">MIT License</a> · Built for developers who live in their IDE.</p>
+</div>

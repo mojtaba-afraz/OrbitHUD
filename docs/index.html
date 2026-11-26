@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OrbitHUD — Never Hit a 5-Hour AI Rate Limit Mid-Flow Again</title>
+  <meta name="description" content="Native macOS (SwiftUI) and Windows/Linux glassmorphic desktop HUD tracking live Google Antigravity, Claude Code, and OpenAI Codex CLI quotas — with smart alerts, SHA256 auto-updates, and zero telemetry." />
+  <link rel="canonical" href="https://mojtaba-afraz.github.io/OrbitHUD/" />
+
+  <!-- Open Graph / Social Preview -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://mojtaba-afraz.github.io/OrbitHUD/" />
+  <meta property="og:title" content="OrbitHUD — Live AI Usage & Quota HUD for Antigravity, Claude Code & Codex" />
+  <meta property="og:description" content="Never hit a 5-hour AI rate limit mid-flow again. Native macOS SwiftUI & Win/Linux desktop HUD with smart quota alerts, SHA256 auto-updates, and zero telemetry." />
+  <meta property="og:image" content="https://mojtaba-afraz.github.io/OrbitHUD/social-preview.png" />
+  <meta property="og:image:width" content="1280" />
+  <meta property="og:image:height" content="640" />
+
+  <!-- Twitter / X Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="OrbitHUD — Live AI Usage & Quota HUD" />
+  <meta name="twitter:description" content="Track Google Antigravity, Claude Code & Codex CLI quotas live on your desktop. Native SwiftUI on macOS, Electron on Win/Linux, zero telemetry." />
+  <meta name="twitter:image" content="https://mojtaba-afraz.github.io/OrbitHUD/social-preview.png" />
+
+  <!-- Inline SVG Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%230B1120'/%3E%3Ccircle cx='256' cy='256' r='144' fill='none' stroke='%233DDB94' stroke-width='32' stroke-linecap='round' stroke-dasharray='700 905' transform='rotate(-90 256 256)'/%3E%3Ccircle cx='256' cy='256' r='96' fill='none' stroke='%2338BDF8' stroke-width='24' stroke-linecap='round' stroke-dasharray='420 603' transform='rotate(-45 256 256)'/%3E%3Cpath d='M256 190 C262 232, 280 250, 322 256 C280 262, 262 280, 256 322 C250 280, 232 262, 190 256 C232 250, 250 232, 256 190 Z' fill='%23FFFFFF'/%3E%3C/svg%3E" />
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "OrbitHUD",
+    "operatingSystem": "macOS, Windows, Linux",
+    "applicationCategory": "DeveloperApplication",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "url": "https://mojtaba-afraz.github.io/OrbitHUD/",
+    "downloadUrl": "https://github.com/mojtaba-afraz/OrbitHUD/releases/latest",
+    "license": "https://opensource.org/licenses/MIT"
+  }
+  </script>
+
+  <style>
+    :root {
+      --bg: #07090F;
+      --surface: rgba(255, 255, 255, 0.045);
+      --surface-hover: rgba(255, 255, 255, 0.075);
+      --border: rgba(255, 255, 255, 0.11);
+      --border-hi: rgba(255, 255, 255, 0.24);
+      --text: #F8FAFC;
+      --muted: #94A3B8;
+      --emerald: #3DDB94;
+      --cyan: #22D3EE;
+      --sky: #38BDF8;
+      --amber: #FAB838;
+      --claude: #E8926B;
+      --red: #FF5252;
+      --radius: 20px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+      --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+      background-image:
+        radial-gradient(ellipse 65% 45% at 15% -5%, rgba(61, 219, 148, 0.14), transparent 60%),
+        radial-gradient(ellipse 55% 40% at 88% 8%, rgba(56, 189, 248, 0.14), transparent 60%),
+        radial-gradient(ellipse 45% 35% at 50% 95%, rgba(129, 140, 248, 0.08), transparent 60%);
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Nav */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      background: rgba(7, 9, 15, 0.72);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 1.08rem;
+      letter-spacing: -0.02em;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
+      color: var(--text) !important;
+      font-weight: 600;
+      font-size: 0.86rem;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .nav-cta:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: var(--border-hi);
+    }
+
+    /* Hero */
+    .hero {
+      padding: 72px 0 64px;
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 48px;
+      align-items: center;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: rgba(61, 219, 148, 0.10);
+      border: 1px solid rgba(61, 219, 148, 0.28);
+      color: var(--emerald);
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 18px;
+    }
+    .eyebrow-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--emerald);
+      box-shadow: 0 0 10px var(--emerald);
+    }
+    h1 {
+      font-size: clamp(2.2rem, 4.4vw, 3.4rem);
+      line-height: 1.08;
+      letter-spacing: -0.035em;
+      font-weight: 800;
+      margin-bottom: 18px;
+    }
+    .gradient-text {
+      background: linear-gradient(120deg, var(--emerald), var(--cyan) 55%, #818CF8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero-sub {
+      font-size: 1.08rem;
+      color: var(--muted);
+      max-width: 540px;
+      margin-bottom: 28px;
+    }
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 13px 22px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--emerald), var(--cyan));
+      color: #041014;
+      font-weight: 700;
+      font-size: 0.96rem;
+      box-shadow: 0 12px 32px rgba(34, 211, 238, 0.22);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 36px rgba(34, 211, 238, 0.30);
+    }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 13px 18px;
+      border-radius: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.94rem;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .btn-secondary:hover {
+      background: var(--surface-hover);
+      border-color: var(--border-hi);
+    }
+    .os-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .os-meta a {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      color: #CBD5E1;
+    }
+    .os-meta a:hover { color: var(--emerald); }
+
+    /* Interactive HUD Preview */
+    .hud-stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+    .hud-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+    }
+    .hud-ctrl-btn {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .hud-ctrl-btn.active {
+      background: rgba(255, 255, 255, 0.15);
+      color: var(--text);
+    }
+    .hud-card {
+      width: 368px;
+      max-width: 100%;
+      padding: 15px;
+      border-radius: 24px;
+      background: linear-gradient(155deg, rgba(255,255,255,0.10), rgba(15,23,42,0.72));
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border: 1px solid rgba(255,255,255,0.22);
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      transition: all 0.22s ease;
+    }
+    .hud-card.compact {
+      border-radius: 26px;
+      padding: 10px 14px;
+    }
+    .hud-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .hud-title {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--emerald);
+    }
+    .float-badge {
+      font-size: 0.68rem;
+      color: rgba(255,255,255,0.62);
+      background: rgba(255,255,255,0.08);
+      padding: 2px 7px;
+      border-radius: 999px;
+    }
+    .provider-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      padding: 3px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      margin-bottom: 10px;
+    }
+    .ptab {
+      border: 0;
+      background: transparent;
+      color: rgba(255,255,255,0.68);
+      font-family: var(--font);
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 4px 0;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .ptab.active {
+      background: rgba(255,255,255,0.16);
+      color: #FFF;
+    }
+    .bento-list {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+    .bento-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 11px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    .ring {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .ring-inner {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #0F1626;
+      display: grid;
+      place-items: center;
+      font-size: 0.74rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .bento-body { flex: 1; min-width: 0; }
+    .bento-top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+    .bento-name {
+      font-size: 0.82rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bento-stat {
+      font-size: 0.7rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .bento-sub {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.68rem;
+      color: rgba(255,255,255,0.58);
+      margin-bottom: 4px;
+    }
+    .bar-track {
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.11);
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+    }
+    .compact-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .compact-metric {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .mini-ring {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+    }
+    .mini-ring-in {
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      background: #0F1626;
+    }
+    .compact-val { font-size: 0.76rem; font-weight: 700; line-height: 1.1; }
+    .compact-lbl { font-size: 0.62rem; color: rgba(255,255,255,0.55); }
+    .alert-toast {
+      width: 368px;
+      max-width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 13px;
+      border-radius: 15px;
+      background: linear-gradient(135deg, rgba(250, 184, 56, 0.14), rgba(255, 255, 255, 0.05));
+      border: 1px solid rgba(250, 184, 56, 0.34);
+      font-size: 0.78rem;
+    }
+    .alert-toast strong { display: block; font-size: 0.8rem; color: #FFF; }
+    .alert-toast span { color: #CBD5E1; font-size: 0.74rem; }
+
+    /* Sections */
+    section { padding: 64px 0; }
+    .sec-head {
+      text-align: center;
+      max-width: 660px;
+      margin: 0 auto 42px;
+    }
+    .sec-head h2 {
+      font-size: clamp(1.6rem, 3vw, 2.25rem);
+      letter-spacing: -0.03em;
+      margin-bottom: 10px;
+    }
+    .sec-head p { color: var(--muted); font-size: 1rem; }
+
+    /* Feature Bento Grid */
+    .feat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+    .feat-card {
+      padding: 24px;
+      border-radius: var(--radius);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      transition: border-color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+    }
+    .feat-card:hover {
+      background: var(--surface-hover);
+      border-color: var(--border-hi);
+      transform: translateY(-2px);
+    }
+    .feat-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      font-size: 1.2rem;
+      background: rgba(61, 219, 148, 0.12);
+      border: 1px solid rgba(61, 219, 148, 0.25);
+      margin-bottom: 14px;
+    }
+    .feat-card h3 {
+      font-size: 1.05rem;
+      margin-bottom: 8px;
+      letter-spacing: -0.015em;
+    }
+    .feat-card p {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    /* Install Box */
+    .install-box {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 24px;
+      border-radius: 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    .install-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .itab {
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 0.86rem;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .itab.active {
+      background: rgba(61, 219, 148, 0.14);
+      border-color: rgba(61, 219, 148, 0.42);
+      color: var(--text);
+    }
+    .code-block {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 16px;
+      border-radius: 14px;
+      background: rgba(0, 0, 0, 0.48);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      font-family: var(--mono);
+      font-size: 0.86rem;
+      color: #E2E8F0;
+      overflow-x: auto;
+    }
+    .copy-btn {
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.16); }
+    .install-note {
+      margin-top: 12px;
+      font-size: 0.83rem;
+      color: var(--muted);
+    }
+
+    /* Privacy Strip */
+    .privacy-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .privacy-card {
+      padding: 20px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+    }
+    .privacy-card h4 {
+      font-size: 0.96rem;
+      margin-bottom: 6px;
+      color: var(--emerald);
+    }
+    .privacy-card p { font-size: 0.86rem; color: var(--muted); }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 36px 0 48px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .footer-links {
+      display: flex;
+      gap: 20px;
+    }
+    .footer-links a:hover { color: var(--text); }
+
+    @media (max-width: 900px) {
+      .hero-grid { grid-template-columns: 1fr; text-align: center; }
+      .hero-sub { margin-left: auto; margin-right: auto; }
+      .cta-row, .os-meta { justify-content: center; }
+      .feat-grid, .privacy-grid { grid-template-columns: 1fr; }
+      .nav-links a:not(.nav-cta) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="container nav-inner">
+      <a href="#" class="brand">
+        <svg width="24" height="24" viewBox="0 0 512 512" aria-hidden="true">
+          <circle cx="256" cy="256" r="144" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="34"/>
+          <circle cx="256" cy="256" r="144" fill="none" stroke="#3DDB94" stroke-width="34" stroke-linecap="round" stroke-dasharray="700 905" transform="rotate(-90 256 256)"/>
+          <circle cx="256" cy="256" r="96" fill="none" stroke="#38BDF8" stroke-width="26" stroke-linecap="round" stroke-dasharray="420 603" transform="rotate(-45 256 256)"/>
+          <path d="M256 190 C262 232, 280 250, 322 256 C280 262, 262 280, 256 322 C250 280, 232 262, 190 256 C232 250, 250 232, 256 190 Z" fill="#FFFFFF"/>
+        </svg>
+        OrbitHUD
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="#privacy">Privacy</a>
+        <a href="https://github.com/mojtaba-afraz/OrbitHUD/blob/main/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
+        <a href="https://github.com/mojtaba-afraz/OrbitHUD" target="_blank" rel="noopener" class="nav-cta">Star on GitHub ★</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <div class="eyebrow">
+            <span class="eyebrow-dot"></span>
+            Native macOS SwiftUI + Windows &amp; Linux · MIT Open Source
+          </div>
+          <h1>Never hit a 5-hour <span class="gradient-text">AI rate limit</span> mid-flow again.</h1>
+          <p class="hero-sub">
+            OrbitHUD floats cleanly over your IDE or wallpaper to track live <strong>Google Antigravity</strong>, <strong>Claude Code</strong>, and <strong>OpenAI Codex CLI</strong> quotas — with proactive low-quota &amp; reset alerts and zero telemetry.
+          </p>
+          <div class="cta-row">
+            <a id="primary-download-btn" href="https://github.com/mojtaba-afraz/OrbitHUD/releases/latest/download/OrbitHUD-macOS.dmg" class="btn-primary">
+              <span id="primary-download-label">Download for macOS</span>
+            </a>
+            <a href="https://github.com/mojtaba-afraz/OrbitHUD" target="_blank" rel="noopener" class="btn-secondary">
+              View on GitHub
+            </a>
+          </div>
+          <div class="os-meta">
+            <span>Direct releases:</span>
+            <a href="https://github.com/mojtaba-afraz/OrbitHUD/releases/latest/download/OrbitHUD-macOS.dmg">macOS (.dmg)</a>
+            <a href="https://github.com/mojtaba-afraz/OrbitHUD/releases/latest/download/OrbitHUD-Windows-Setup.exe">Windows (.exe)</a>
+            <a href="https://github.com/mojtaba-afraz/OrbitHUD/releases/latest/download/OrbitHUD-Linux-x86_64.AppImage">Linux (.AppImage)</a>
+          </div>
+        </div>
+
+        <div class="hud-stage">
+          <div class="hud-controls" role="group" aria-label="Preview layout switcher">
+            <button class="hud-ctrl-btn active" id="mode-bento" type="button">Bento Glass</button>
+            <button class="hud-ctrl-btn" id="mode-compact" type="button">52px Compact Pill</button>
+          </div>
+
+          <div class="hud-card" id="live-hud-card">
+            <div id="hud-bento-view">
+              <div class="hud-header">
+                <div class="hud-title">
+                  <svg width="16" height="16" viewBox="0 0 512 512" aria-hidden="true">
+                    <circle cx="256" cy="256" r="144" fill="none" stroke="#3DDB94" stroke-width="38" stroke-linecap="round" stroke-dasharray="700 905" transform="rotate(-90 256 256)"/>
+                    <circle cx="256" cy="256" r="96" fill="none" stroke="#38BDF8" stroke-width="30" stroke-linecap="round" stroke-dasharray="420 603" transform="rotate(-45 256 256)"/>
+                    <path d="M256 190 C262 232, 280 250, 322 256 C280 262, 262 280, 256 322 C250 280, 232 262, 190 256 C232 250, 250 232, 256 190 Z" fill="#FFF"/>
+                  </svg>
+                  OrbitHUD
+                  <span class="live-dot"></span>
+                  <span class="float-badge">Float</span>
+                </div>
+                <span style="font-size:0.7rem;color:var(--muted);">Interactive Preview</span>
+              </div>
+
+              <div class="provider-tabs" role="tablist">
+                <button class="ptab active" data-provider="all" type="button">All</button>
+                <button class="ptab" data-provider="antigravity" type="button">AGY</button>
+                <button class="ptab" data-provider="claude" type="button">Claude</button>
+                <button class="ptab" data-provider="codex" type="button">Codex</button>
+              </div>
+
+              <div class="bento-list" id="bento-list"></div>
+            </div>
+
+            <div id="hud-compact-view" style="display:none;">
+              <div class="compact-row" id="compact-row"></div>
+            </div>
+          </div>
+
+          <div class="alert-toast">
+            <span style="font-size:1.1rem;">🔔</span>
+            <div>
+              <strong>Smart Alert · Low Quota (18%)</strong>
+              <span>Gemini 5h limit crossed below 20% · Resets in 1h 42m</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="container">
+        <div class="sec-head">
+          <h2>Built for engineers who live in their editor</h2>
+          <p>Lightweight, fast, and focused — every feature solves a real friction point in AI-assisted coding.</p>
+        </div>
+
+        <div class="feat-grid">
+          <article class="feat-card">
+            <div class="feat-icon">🍎</div>
+            <h3>True Native macOS SwiftUI</h3>
+            <p>Compiled universal binary (Apple Silicon + Intel) with genuine <code>NSVisualEffectView</code> behind-window blur and minimal RAM overhead.</p>
+          </article>
+          <article class="feat-card">
+            <div class="feat-icon">🔔</div>
+            <h3>Smart Quota &amp; Reset Alerts</h3>
+            <p>Opt-in native OS notifications when a quota crosses below 20% / 15% / 10% / 5% — and again when your 5h window resets back to 100%.</p>
+          </article>
+          <article class="feat-card">
+            <div class="feat-icon">🧩</div>
+            <h3>Multi-Provider in One HUD</h3>
+            <p>Tracks Google Antigravity out of the box plus opt-in Claude Code and OpenAI Codex CLI with instant account-switch &amp; logout detection.</p>
+          </article>
+          <article class="feat-card">
+            <div class="feat-icon">🛡</div>
+            <h3>SHA256-Verified Auto-Updates</h3>
+            <p>One-click GitHub Releases updates on macOS, Windows, and Linux with fail-closed SHA256 verification against <code>SHA256SUMS.txt</code>.</p>
+          </article>
+          <article class="feat-card">
+            <div class="feat-icon">🪟</div>
+            <h3>Bento Glass ↔ 52px Pill</h3>
+            <p>Float above full-screen editors, pin to your desktop wallpaper, or collapse into a 52px coding pill with multi-monitor recovery.</p>
+          </article>
+          <article class="feat-card">
+            <div class="feat-icon">🔒</div>
+            <h3>100% Local &amp; Zero Telemetry</h3>
+            <p>Antigravity connects strictly over <code>127.0.0.1</code> loopback. No analytics, no tracking beacons, no third-party relay servers.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="container">
+        <div class="sec-head">
+          <h2>Install in 10 seconds</h2>
+          <p>Use your favorite package manager or grab a direct installer from GitHub Releases.</p>
+        </div>
+
+        <div class="install-box">
+          <div class="install-tabs" role="tablist">
+            <button class="itab active" data-os="macos" type="button">🍎 macOS (Homebrew)</button>
+            <button class="itab" data-os="windows" type="button">🪟 Windows (WinGet)</button>
+            <button class="itab" data-os="linux" type="button">🐧 Linux (AUR / Shell)</button>
+          </div>
+          <div class="code-block">
+            <code id="install-cmd">brew tap mojtaba-afraz/tap &amp;&amp; brew install --cask --no-quarantine orbithud</code>
+            <button class="copy-btn" id="copy-cmd-btn" type="button">Copy</button>
+          </div>
+          <p class="install-note" id="install-note">
+            Universal binary for Apple Silicon &amp; Intel (macOS 13+). Includes native SHA256-verified auto-updates.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <div class="container">
+        <div class="sec-head">
+          <h2>Transparent by design</h2>
+          <p>Open-source MIT code you can audit in minutes — zero hidden network calls.</p>
+        </div>
+        <div class="privacy-grid">
+          <div class="privacy-card">
+            <h4>Local Loopback Default</h4>
+            <p>Antigravity quotas are fetched directly from your local Language Server on <code>127.0.0.1</code> with zero API keys.</p>
+          </div>
+          <div class="privacy-card">
+            <h4>Strictly Opt-In Providers</h4>
+            <p>Claude Code and Codex CLI stay disabled until you toggle them on in Settings. Credentials never leave your machine.</p>
+          </div>
+          <div class="privacy-card">
+            <h4>Fail-Closed Verification</h4>
+            <p>Every auto-update download is hashed locally with SHA256 and aborted immediately if it doesn't match <code>SHA256SUMS.txt</code>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-inner">
+      <div><strong>OrbitHUD</strong> · MIT License · Built for developers</div>
+      <div class="footer-links">
+        <a href="https://github.com/mojtaba-afraz/OrbitHUD" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/mojtaba-afraz/OrbitHUD/releases/latest" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/mojtaba-afraz/OrbitHUD/blob/main/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
+        <a href="https://github.com/mojtaba-afraz/OrbitHUD/issues" target="_blank" rel="noopener">Issues</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const MODELS = [
+      { provider: "antigravity", name: "Gemini Models", short: "Gem 5h", pct: 78, reset: "3h 10m", wkPct: 86, wkReset: "5d 12h" },
+      { provider: "claude", name: "Claude Code", short: "Cld 5h", pct: 34, reset: "1h 42m", wkPct: 72, wkReset: "4d 6h" },
+      { provider: "codex", name: "Codex CLI", short: "Codex", pct: 92, reset: "4h 18m", wkPct: 95, wkReset: "6d 1h" }
+    ];
+
+    function semanticColor(pct) {
+      if (pct <= 15) return "#FF5252";
+      if (pct <= 40) return "#FAB838";
+      return "#3DDB94";
+    }
+
+    let activeProvider = "all";
+    let isCompact = false;
+
+    function renderHUD() {
+      const items = activeProvider === "all" ? MODELS : MODELS.filter(m => m.provider === activeProvider);
+      const bentoList = document.getElementById("bento-list");
+      const compactRow = document.getElementById("compact-row");
+
+      bentoList.innerHTML = items.map(m => {
+        const col = semanticColor(m.pct);
+        const wkCol = semanticColor(m.wkPct);
+        return `
+          <div class="bento-item">
+            <div class="ring" style="background: conic-gradient(${col} ${m.pct * 3.6}deg, rgba(255,255,255,0.12) 0deg);">
+              <div class="ring-inner">${m.pct}%</div>
+            </div>
+            <div class="bento-body">
+              <div class="bento-top">
+                <span class="bento-name">${m.name}</span>
+                <span class="bento-stat" style="color:${col};">5h: ${m.pct}% · ${m.reset}</span>
+              </div>
+              <div class="bento-sub">
+                <span>Weekly limit</span>
+                <span>${m.wkPct}% left · ${m.wkReset}</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill" style="width:${m.wkPct}%;background:${wkCol};"></div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      compactRow.innerHTML = items.map(m => {
+        const col = semanticColor(m.pct);
+        return `
+          <div class="compact-metric">
+            <div class="mini-ring" style="background: conic-gradient(${col} ${m.pct * 3.6}deg, rgba(255,255,255,0.12) 0deg);">
+              <div class="mini-ring-in"></div>
+            </div>
+            <div>
+              <div class="compact-val">${m.pct}%</div>
+              <div class="compact-lbl">${m.short}</div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("hud-bento-view").style.display = isCompact ? "none" : "block";
+      document.getElementById("hud-compact-view").style.display = isCompact ? "block" : "none";
+      document.getElementById("live-hud-card").classList.toggle("compact", isCompact);
+    }
+
+    document.getElementById("mode-bento").addEventListener("click", () => {
+      isCompact = false;
+      document.getElementById("mode-bento").classList.add("active");
+      document.getElementById("mode-compact").classList.remove("active");
+      renderHUD();
+    });
+    document.getElementById("mode-compact").addEventListener("click", () => {
+      isCompact = true;
+      document.getElementById("mode-compact").classList.add("active");
+      document.getElementById("mode-bento").classList.remove("active");
+      renderHUD();
+    });
+    document.querySelectorAll(".ptab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        activeProvider = btn.dataset.provider;
+        document.querySelectorAll(".ptab").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderHUD();
+      });
+    });
+
+    const INSTALLS = {
+      macos: {
+        cmd: "brew tap mojtaba-afraz/tap && brew install --cask --no-quarantine orbithud",
+        note: "Universal binary for Apple Silicon & Intel (macOS 13+). Includes native SHA256-verified auto-updates."
+      },
+      windows: {
+        cmd: "winget install MojtabaAfraz.OrbitHUD",
+        note: "Windows 10 / 11 (x64) installer & portable .exe available. Runs cleanly in System Tray."
+      },
+      linux: {
+        cmd: "yay -S orbithud-bin",
+        note: "Also available as a universal .AppImage or .deb package on GitHub Releases."
+      }
+    };
+
+    function selectInstallOS(osKey) {
+      document.querySelectorAll(".itab").forEach(b => b.classList.toggle("active", b.dataset.os === osKey));
+      document.getElementById("install-cmd").textContent = INSTALLS[osKey].cmd;
+      document.getElementById("install-note").textContent = INSTALLS[osKey].note;
+    }
+
+    document.querySelectorAll(".itab").forEach(btn => {
+      btn.addEventListener("click", () => selectInstallOS(btn.dataset.os));
+    });
+
+    document.getElementById("copy-cmd-btn").addEventListener("click", async () => {
+      const text = document.getElementById("install-cmd").textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        const btn = document.getElementById("copy-cmd-btn");
+        btn.textContent = "Copied!";
+        setTimeout(() => (btn.textContent = "Copy"), 1600);
+      } catch {}
+    });
+
+    // OS Auto-Detection for Primary CTA
+    (function detectOS() {
+      const ua = (navigator.userAgent || "").toLowerCase();
+      const btn = document.getElementById("primary-download-btn");
+      const lbl = document.getElementById("primary-download-label");
+      if (ua.includes("win")) {
+        btn.href = "https://github.com/mojtaba-afraz/OrbitHUD/releases/latest/download/OrbitHUD-Windows-Setup.exe";
+        lbl.textContent = "Download for Windows";
+        selectInstallOS("windows");
+      } else if (ua.includes("linux") && !ua.includes("android")) {
+        btn.href = "https://github.com/mojtaba-afraz/OrbitHUD/releases/latest/download/OrbitHUD-Linux-x86_64.AppImage";
+        lbl.textContent = "Download for Linux";
+        selectInstallOS("linux");
+      } else {
+        selectInstallOS("macos");
+      }
+    })();
+
+    renderHUD();
+  </script>
+</body>
+</html>
