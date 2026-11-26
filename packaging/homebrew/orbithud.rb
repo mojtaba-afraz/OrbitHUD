@@ -1,5 +1,5 @@
 cask "orbithud" do
-  version "1.2.6"
+  version "1.2.7"
   sha256 :no_check
 
   url "https://github.com/mojtaba-afraz/OrbitHUD/releases/download/v#{version}/OrbitHUD-macOS.dmg"
